@@ -1,0 +1,4 @@
+interface:
+  display_name: "Explain Vetch"
+  short_description: "Explain Vetch architecture and repository layout"
+  default_prompt: "Use $explain-vetch to explain this repository and trace its controller flow."

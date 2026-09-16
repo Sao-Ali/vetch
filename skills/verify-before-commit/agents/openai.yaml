@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Before Commit"
+  short_description: "Run Vetch checks before a commit"
+  default_prompt: "Use $verify-before-commit to verify the current Vetch changes before committing."

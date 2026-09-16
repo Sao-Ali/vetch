@@ -1,0 +1,43 @@
+# Build tools, binaries, and reports
+/bin/
+/dist/
+/.local/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.log
+Dockerfile.cross
+
+# Local Go workspace
+go.work
+go.work.sum
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Local credentials and environment
+.env
+.env.*
+!.env.example
+*.kubeconfig
+*.kubeconfig.*
+kubeconfig
+kubeconfig.*
+.kube/
+.aws/
+.ssh/
+secrets/
+*credentials*.json
+*.pem
+*.key
+*.p12
+*.pfx

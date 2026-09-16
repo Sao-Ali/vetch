@@ -1,0 +1,17 @@
+namespace: vetch-system
+namePrefix: vetch-
+
+resources:
+- ../crd
+- ../rbac
+- ../manager
+- metrics_service.yaml
+
+# Authenticated HTTPS metrics for container deployments.
+patches:
+- path: manager_metrics_patch.yaml
+  target:
+    kind: Deployment
+
+# +kubebuilder:scaffold:crdkustomizecainjectionns
+# +kubebuilder:scaffold:crdkustomizecainjectionname
