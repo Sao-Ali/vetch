@@ -3,8 +3,8 @@
 ## Scope and workflow
 
 Vetch is a Kubernetes-based platform for virtual AI inference infrastructure.
-Milestone 2 is complete: VirtualInferenceCluster has spec.nodes and the controller
-reconciles owned ConfigMaps as dummy nodes, including explicit scaling and status.
+VirtualInferenceCluster has spec.nodes and the controller reconciles owned
+ConfigMaps as dummy nodes, including explicit scaling and status.
 
 Do not introduce KubeVirt, inference runtimes,
 virtual accelerators, a CLI, cloud infrastructure, databases, a REST backend,
