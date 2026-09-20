@@ -44,10 +44,9 @@ do not call it passed.
 ## Secret and publication hygiene
 
 List the candidate file names with Git. Confirm ignored local outputs and `.local/`
-are not candidates. If `gitleaks` is installed, run it against the candidate state.
-Otherwise perform a conservative filename and credential-pattern scan without
-printing matched secret values. Treat findings as review items, not proof of a leak.
-Explicitly report when a dedicated secret scanner was unavailable.
+are not candidates. Perform a conservative filename and credential-pattern scan
+limited to the candidate files without printing matched secret values. Treat
+findings as review items, not proof of a leak.
 
 Check that generated binaries, coverage reports, kubeconfigs, `.env` files,
 private keys, and credential files are excluded.
