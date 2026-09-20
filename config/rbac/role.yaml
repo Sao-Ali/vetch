@@ -5,23 +5,24 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - infrastructure.vetch.io
+  - ""
   resources:
-  - virtualinferenceclusters
+  - configmaps
   verbs:
   - create
   - delete
   - get
   - list
-  - patch
   - update
   - watch
 - apiGroups:
   - infrastructure.vetch.io
   resources:
-  - virtualinferenceclusters/finalizers
+  - virtualinferenceclusters
   verbs:
-  - update
+  - get
+  - list
+  - watch
 - apiGroups:
   - infrastructure.vetch.io
   resources:

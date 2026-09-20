@@ -2,20 +2,27 @@
 
 Vetch is a Kubernetes-based platform for virtual AI inference infrastructure.
 
-## Current state: Milestone 1
+## Current state: Milestone 2
 
 A namespaced `VirtualInferenceCluster` resource describes a desired node count.
-The Go controller watches these resources, reads them, and logs the requested count.
-It does not create nodes or run inference yet.
+The Go controller reconciles that count into owned ConfigMaps that stand in for
+virtual inference nodes. It creates, repairs, and removes these dummy nodes and
+reports the result through the resource's `Available` status condition.
 
 ```text
-kubectl → Kubernetes API → VirtualInferenceCluster → Vetch controller → log
+kubectl → Kubernetes API → VirtualInferenceCluster → Vetch controller → owned ConfigMaps
 ```
 
-Next: owned ConfigMaps as dummy nodes, with creation, scaling, deletion, and status.
-Later: a CLI, KubeVirt Linux VMs, userspace virtual accelerators, scheduling, and
-CPU-backed inference. Vetch will model software-visible accelerator properties,
-not emulate GPU hardware or reproduce GPU performance.
+Changing `spec.nodes` explicitly scales the dummy nodes; this is desired-state
+reconciliation, not autoscaling. ConfigMaps use deterministic names such as
+`demo-node-0`, carry labels and controller OwnerReferences, and are watched by
+the controller. An unrelated ConfigMap with a desired name is never adopted or
+deleted. Deleting a parent lets Kubernetes garbage collection remove its children.
+
+The dummy nodes do not run inference. Later milestones may replace them with real
+compute resources and add scheduling and CPU-backed inference. Vetch will model
+software-visible accelerator properties, not emulate GPU hardware or reproduce
+GPU performance.
 
 ## Run locally
 
@@ -47,8 +54,17 @@ kubectl apply -f config/samples/infrastructure_v1alpha1_virtualinferencecluster.
 kubectl get virtualinferencecluster demo -o yaml
 ```
 
-The sample requests `nodes: 2`. Look for `Observed VirtualInferenceCluster`
-with `desiredNodes: 2` in the controller log.
+The sample requests `nodes: 2`. Look for `Reconciling VirtualInferenceCluster`
+with `desiredNodes: 2` in the controller log, then inspect the result:
+
+```bash
+kubectl get configmaps -l infrastructure.vetch.io/component=dummy-node
+kubectl get virtualinferencecluster demo -o yaml
+```
+
+The controller creates `demo-node-0` and `demo-node-1`, and the parent reports an
+`Available=True` condition. Edit `spec.nodes` to exercise explicit scale-up and
+scale-down.
 Zero nodes is valid; negative counts are rejected.
 
 Ctrl+C stops the local controller. The resource remains saved in Kubernetes.
@@ -63,8 +79,9 @@ make build
 ```
 
 Tests use Ginkgo/Gomega and envtest: a temporary Kubernetes API server and etcd,
-independent of your development cluster. Deployment end-to-end tests are deferred
-until there is node lifecycle behavior to exercise.
+independent of your development cluster. Envtest does not run Kubernetes garbage
+collection, so deletion cascading must be verified separately in an isolated Kind
+cluster before relying on an end-to-end garbage-collection check.
 
 After API or RBAC marker changes, run `make manifests generate`.
 After Go changes, run `make lint-fix test`.

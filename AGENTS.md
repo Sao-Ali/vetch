@@ -3,10 +3,10 @@
 ## Scope and workflow
 
 Vetch is a Kubernetes-based platform for virtual AI inference infrastructure.
-Milestone 1 is complete: VirtualInferenceCluster has spec.nodes and the controller
-reads it and logs the desired count. No child nodes are created yet.
+Milestone 2 is complete: VirtualInferenceCluster has spec.nodes and the controller
+reconciles owned ConfigMaps as dummy nodes, including explicit scaling and status.
 
-Next: ConfigMaps as dummy nodes. Do not introduce KubeVirt, inference runtimes,
+Do not introduce KubeVirt, inference runtimes,
 virtual accelerators, a CLI, cloud infrastructure, databases, a REST backend,
 a frontend, or monitoring systems until requested.
 The Kubernetes API is the control-plane API.
@@ -37,7 +37,7 @@ Do not stage, commit, push, or deploy unless authorized.
 - Use structured logging with capitalized messages, no trailing periods,
   balanced key/value pairs, and no secrets.
 - Use Kubernetes types such as metav1.Condition and metav1.Time.
-- Milestone 2 children belong in the parent's namespace, with deterministic
+- ConfigMap children belong in the parent's namespace, with deterministic
   names, labels, and controller OwnerReferences.
 - Check ownership before changes; never adopt or delete unrelated objects
   merely because names or labels match.
