@@ -49,7 +49,36 @@ kubectl → Kubernetes API → VirtualInferenceCluster → Vetch controller → 
 
 ## Local setup
 
-### Prerequisites
+Vetch supports a reproducible Nix development shell on Apple Silicon macOS and
+x86_64 Linux. A manual toolchain remains supported as well.
+
+Docker must be installed and running on the host for either setup. On macOS,
+the Nix shell does not replace Docker Desktop or another Docker-compatible
+virtual machine and daemon.
+
+### Nix development environment
+
+Install [Nix](https://nixos.org/download/) with flakes enabled, clone the
+repository, and enter the development shell:
+
+```bash
+nix develop
+```
+
+The locked environment provides Go, gopls, kubectl, kind, Kustomize, Make, and
+Git. Project-specific generation, lint, and envtest tools remain pinned and
+managed by the Makefile.
+
+Confirm the environment before continuing:
+
+```bash
+go version
+kubectl version --client
+kind version
+kustomize version
+```
+
+### Manual prerequisites
 
 - Go 1.26 or newer
 - Docker
