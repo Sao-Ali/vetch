@@ -2,7 +2,15 @@ name: Lint
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions: {}
 
@@ -10,8 +18,9 @@ jobs:
   lint:
     permissions:
       contents: read
-    name: Run on Ubuntu
+    name: Lint
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

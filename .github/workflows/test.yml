@@ -2,7 +2,15 @@ name: Tests
 
 on:
   push:
+    branches:
+      - main
   pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions: {}
 
@@ -10,8 +18,9 @@ jobs:
   test:
     permissions:
       contents: read
-    name: Run on Ubuntu
+    name: Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Clone the code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -25,3 +34,13 @@ jobs:
 
       - name: Running Tests
         run: make test
+
+      - name: Verify generated files are current
+        run: |
+          git diff --exit-code
+          untracked="$(git ls-files --others --exclude-standard)"
+          if [[ -n "${untracked}" ]]; then
+            echo "Generated files are missing from the repository:"
+            printf '%s\n' "${untracked}"
+            exit 1
+          fi
