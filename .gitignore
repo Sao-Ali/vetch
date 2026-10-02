@@ -12,6 +12,10 @@
 *.log
 Dockerfile.cross
 
+# Local project source documents (summarized in README.md)
+/Vetch Advisor Overview - Inference Infrastructure.pdf
+/Vetch Full Proposal.pdf
+
 # Local Go workspace
 go.work
 go.work.sum
