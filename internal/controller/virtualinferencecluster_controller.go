@@ -70,8 +70,15 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 			capacity = *cluster.Spec.VMCount * *cluster.Spec.WorkersPerVM
 		}
 		log.Info("Reconciling VirtualInferenceCluster", "desiredVMs", *cluster.Spec.VMCount)
-		if err := r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
-			"VMProvisioningPending", "VM mode: VM provisioning is pending implementation", &capacity); err != nil {
+		status := metav1.ConditionFalse
+		reason := "VMProvisioningPending"
+		message := "VM mode: VM provisioning is pending implementation"
+		if *cluster.Spec.VMCount == 0 {
+			status = metav1.ConditionTrue
+			reason = "NoVMsRequested"
+			message = "VM mode: no VMs requested"
+		}
+		if err := r.setAvailableCondition(ctx, cluster, status, reason, message, &capacity); err != nil {
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{}, nil

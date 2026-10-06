@@ -236,6 +236,10 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		current = getCluster(testContext, client.ObjectKeyFromObject(cluster))
 		Expect(current.Status.DeclaredWorkerCapacity).To(Equal(ptr(int32(0))))
+		condition := meta.FindStatusCondition(current.Status.Conditions, availableConditionType)
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(condition.Reason).To(Equal("NoVMsRequested"))
+		Expect(condition.ObservedGeneration).To(Equal(current.Generation))
 	})
 
 	It("accepts zero VMs without a template", func() {

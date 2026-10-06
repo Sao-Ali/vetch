@@ -95,8 +95,8 @@ spec:
           status:
             properties:
               conditions:
-                description: Available reflects legacy placeholder reconciliation;
-                  VM requests report pending.
+                description: Available reflects legacy placeholders or an empty VM
+                  request; positive VM requests report pending.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.

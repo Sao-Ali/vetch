@@ -74,7 +74,7 @@ type VirtualInferenceClusterStatus struct {
 	// +optional
 	DeclaredWorkerCapacity *int32 `json:"declaredWorkerCapacity,omitempty"`
 
-	// Available reflects legacy placeholder reconciliation; VM requests report pending.
+	// Available reflects legacy placeholders or an empty VM request; positive VM requests report pending.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
