@@ -1,15 +1,21 @@
-## What changed
+## Context
 
-<!-- Briefly describe the change and why it is needed. -->
+<!-- Link the issue or explain the problem. Use Closes #N only when this PR fully resolves it. -->
+
+## Changes
+
+<!-- Summarize the approach and the files or behavior reviewers should focus on. -->
 
 ## Validation
 
 <!-- List the commands you ran and any manual checks you performed. -->
 
-- [ ] `make lint-fix` passes.
-- [ ] `make test` passes.
-- [ ] Tests were added or updated when behavior changed.
-- [ ] Generated files were committed when API fields or markers changed.
-- [ ] User-facing behavior changes were documented.
+## Review notes
 
-<!-- Mark an item not applicable when it does not apply to this change. -->
+<!-- Call out compatibility effects, limitations, risks, or follow-up work. Write "None" if there are none. -->
+
+## Checklist
+
+- [ ] Tests cover changed behavior, when applicable.
+- [ ] Generated files are included for API or marker changes, when applicable.
+- [ ] Behavior or compatibility changes are documented, when applicable.

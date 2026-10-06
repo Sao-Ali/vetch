@@ -47,7 +47,6 @@ const (
 	maxObjectNameLength    = 253
 )
 
-// VirtualInferenceClusterReconciler reconciles a VirtualInferenceCluster object.
 type VirtualInferenceClusterReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
@@ -57,26 +56,40 @@ type VirtualInferenceClusterReconciler struct {
 // +kubebuilder:rbac:groups=infrastructure.vetch.io,resources=virtualinferenceclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;delete
 
-// Reconcile makes the owned dummy-node ConfigMaps match the requested node count.
 func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
 	cluster := &infrastructurev1alpha1.VirtualInferenceCluster{}
 	if err := r.Get(ctx, req.NamespacedName, cluster); err != nil {
-		// A deleted cluster no longer needs to be reconciled.
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	log.Info("Reconciling VirtualInferenceCluster", "desiredNodes", cluster.Spec.Nodes)
+	if cluster.Spec.VMCount != nil {
+		capacity := int32(0)
+		if cluster.Spec.WorkersPerVM != nil {
+			capacity = *cluster.Spec.VMCount * *cluster.Spec.WorkersPerVM
+		}
+		log.Info("Reconciling VirtualInferenceCluster", "desiredVMs", *cluster.Spec.VMCount)
+		if err := r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
+			"VMProvisioningPending", "VM mode: VM provisioning is pending implementation", &capacity); err != nil {
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{}, nil
+	}
+
+	if cluster.Spec.Nodes == nil {
+		return ctrl.Result{}, fmt.Errorf("legacy VirtualInferenceCluster %q has no nodes", cluster.Name)
+	}
+	log.Info("Reconciling VirtualInferenceCluster", "desiredNodes", *cluster.Spec.Nodes)
 
 	if err := r.reconcileDummyNodes(ctx, cluster); err != nil {
 		conditionErr := r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
-			"ReconciliationFailed", err.Error())
+			"ReconciliationFailed", err.Error(), nil)
 		return ctrl.Result{}, errors.Join(err, conditionErr)
 	}
 
-	message := fmt.Sprintf("All %d dummy nodes are available", cluster.Spec.Nodes)
-	if err := r.setAvailableCondition(ctx, cluster, metav1.ConditionTrue, "Reconciled", message); err != nil {
+	message := fmt.Sprintf("Legacy mode: all %d dummy nodes are available", *cluster.Spec.Nodes)
+	if err := r.setAvailableCondition(ctx, cluster, metav1.ConditionTrue, "Reconciled", message, nil); err != nil {
 		return ctrl.Result{}, err
 	}
 
@@ -87,8 +100,8 @@ func (r *VirtualInferenceClusterReconciler) reconcileDummyNodes(
 	ctx context.Context,
 	cluster *infrastructurev1alpha1.VirtualInferenceCluster,
 ) error {
-	desiredNames := make(map[string]struct{}, cluster.Spec.Nodes)
-	for nodeIndex := int32(0); nodeIndex < cluster.Spec.Nodes; nodeIndex++ {
+	desiredNames := make(map[string]struct{}, *cluster.Spec.Nodes)
+	for nodeIndex := int32(0); nodeIndex < *cluster.Spec.Nodes; nodeIndex++ {
 		name := dummyNodeName(cluster.Name, nodeIndex)
 		desiredNames[name] = struct{}{}
 		if err := r.reconcileDummyNode(ctx, cluster, nodeIndex, name); err != nil {
@@ -209,8 +222,10 @@ func (r *VirtualInferenceClusterReconciler) setAvailableCondition(
 	status metav1.ConditionStatus,
 	reason string,
 	message string,
+	declaredWorkerCapacity *int32,
 ) error {
 	original := cluster.DeepCopy()
+	cluster.Status.DeclaredWorkerCapacity = declaredWorkerCapacity
 	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 		Type:               availableConditionType,
 		Status:             status,
@@ -227,7 +242,6 @@ func (r *VirtualInferenceClusterReconciler) setAvailableCondition(
 	return nil
 }
 
-// SetupWithManager sets up the controller with the Manager.
 func (r *VirtualInferenceClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1alpha1.VirtualInferenceCluster{}).

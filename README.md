@@ -77,6 +77,8 @@ For environment details and troubleshooting, see the
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch and pull request process.
+
 Run the standard checks before submitting a change:
 
 ```bash
