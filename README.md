@@ -36,6 +36,16 @@ Changing `spec.nodes` scales the placeholder nodes up or down. The controller
 uses deterministic names and Kubernetes ownership, repairs managed objects, and
 does not adopt unrelated ConfigMaps.
 
+The API also accepts a VM request using `spec.vmCount`, `spec.workersPerVM`,
+`spec.model`, and the guest settings in `spec.vm`. See the
+[VM example](config/samples/infrastructure_v1alpha1_virtualinferencecluster_vm.yaml).
+This mode does not create VMs yet: a positive count reports
+`Available=False` with reason `VMProvisioningPending`. A zero count reports
+`Available=True` with reason `NoVMsRequested`. Its
+`declaredWorkerCapacity` is the requested VM count times workers per VM, not
+an observed worker count. Resources using only `spec.nodes` keep the legacy
+ConfigMap behavior.
+
 ## Quick start
 
 You need Docker, [kind](https://kind.sigs.k8s.io/), kubectl, Make, and Go 1.26 or
@@ -76,6 +86,8 @@ For environment details and troubleshooting, see the
 [development guide](docs/development.md).
 
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the branch and pull request process.
 
 Run the standard checks before submitting a change:
 

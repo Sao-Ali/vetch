@@ -17,8 +17,6 @@ spec:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: VirtualInferenceCluster is the Schema for the virtualinferenceclusters
-          API
         properties:
           apiVersion:
             description: |-
@@ -38,31 +36,67 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of VirtualInferenceCluster
             properties:
+              model:
+                description: model is an opaque identifier shared by the workers.
+                minLength: 1
+                type: string
               nodes:
-                description: nodes is the desired number of virtual inference nodes.
-                  Zero requests an empty cluster.
+                description: nodes requests legacy dummy ConfigMaps.
                 format: int32
                 minimum: 0
                 type: integer
-            required:
-            - nodes
+              vm:
+                properties:
+                  cpuCores:
+                    description: cpuCores specifies guest vCPUs, not dedicated host
+                      cores.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  guestImage:
+                    description: guestImage is a bootable KubeVirt containerDisk OCI
+                      image reference.
+                    minLength: 1
+                    type: string
+                  memory:
+                    anyOf:
+                    - type: integer
+                    - type: string
+                    description: memory specifies guest memory, excluding host overhead.
+                    pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                    type: string
+                    x-kubernetes-int-or-string: true
+                    x-kubernetes-validations:
+                    - message: memory must be positive
+                      rule: quantity(self).isGreaterThan(quantity('0'))
+                type: object
+              vmCount:
+                format: int32
+                maximum: 1
+                minimum: 0
+                type: integer
+              workersPerVM:
+                description: workersPerVM is a declared count, not observed capacity.
+                format: int32
+                minimum: 1
+                type: integer
             type: object
+            x-kubernetes-validations:
+            - message: either nodes or vmCount must be specified
+              rule: has(self.nodes) || has(self.vmCount)
+            - message: nodes must be zero or omitted in VM mode
+              rule: '!has(self.vmCount) || !has(self.nodes) || self.nodes == 0'
+            - message: positive vmCount requires workersPerVM, model, guestImage,
+                cpuCores, and memory
+              rule: '!has(self.vmCount) || self.vmCount == 0 || (has(self.workersPerVM)
+                && has(self.model) && has(self.vm) && has(self.vm.guestImage) && has(self.vm.cpuCores)
+                && has(self.vm.memory))'
           status:
-            description: status defines the observed state of VirtualInferenceCluster
             properties:
               conditions:
-                description: |-
-                  conditions represent the current state of the VirtualInferenceCluster resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: Available reflects legacy placeholders or an empty VM
+                  request; positive VM requests report pending.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -121,6 +155,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              declaredWorkerCapacity:
+                description: declaredWorkerCapacity is vmCount * workersPerVM, not
+                  serving capacity.
+                format: int32
+                type: integer
             type: object
         required:
         - spec

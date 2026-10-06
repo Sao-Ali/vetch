@@ -17,29 +17,64 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
 
-// VirtualInferenceClusterSpec defines the desired state of VirtualInferenceCluster
+// +kubebuilder:validation:XValidation:rule="has(self.nodes) || has(self.vmCount)",message="either nodes or vmCount must be specified"
+// +kubebuilder:validation:XValidation:rule="!has(self.vmCount) || !has(self.nodes) || self.nodes == 0",message="nodes must be zero or omitted in VM mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.vmCount) || self.vmCount == 0 || (has(self.workersPerVM) && has(self.model) && has(self.vm) && has(self.vm.guestImage) && has(self.vm.cpuCores) && has(self.vm.memory))",message="positive vmCount requires workersPerVM, model, guestImage, cpuCores, and memory"
 type VirtualInferenceClusterSpec struct {
-	// nodes is the desired number of virtual inference nodes. Zero requests an empty cluster.
+	// nodes requests legacy dummy ConfigMaps.
 	// +kubebuilder:validation:Minimum=0
-	// +required
-	Nodes int32 `json:"nodes"`
+	// +optional
+	Nodes *int32 `json:"nodes,omitempty"`
+
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	// +optional
+	VMCount *int32 `json:"vmCount,omitempty"`
+
+	// workersPerVM is a declared count, not observed capacity.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	WorkersPerVM *int32 `json:"workersPerVM,omitempty"`
+
+	// model is an opaque identifier shared by the workers.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Model *string `json:"model,omitempty"`
+
+	// +optional
+	VM *VirtualInferenceVMTemplate `json:"vm,omitempty"`
 }
 
-// VirtualInferenceClusterStatus defines the observed state of VirtualInferenceCluster.
+type VirtualInferenceVMTemplate struct {
+	// guestImage is a bootable KubeVirt containerDisk OCI image reference.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	GuestImage *string `json:"guestImage,omitempty"`
+
+	// cpuCores specifies guest vCPUs, not dedicated host cores.
+	// +kubebuilder:validation:Minimum=1
+	// +optional
+	CPUCores *int32 `json:"cpuCores,omitempty"`
+
+	// memory specifies guest memory, excluding host overhead.
+	// +kubebuilder:validation:Type=string
+	// +kubebuilder:validation:Pattern=`^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$`
+	// +kubebuilder:validation:XValidation:rule="quantity(self).isGreaterThan(quantity('0'))",message="memory must be positive"
+	// +optional
+	Memory *resource.Quantity `json:"memory,omitempty"`
+}
+
 type VirtualInferenceClusterStatus struct {
-	// conditions represent the current state of the VirtualInferenceCluster resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// declaredWorkerCapacity is vmCount * workersPerVM, not serving capacity.
+	// +optional
+	DeclaredWorkerCapacity *int32 `json:"declaredWorkerCapacity,omitempty"`
+
+	// Available reflects legacy placeholders or an empty VM request; positive VM requests report pending.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -49,26 +84,21 @@ type VirtualInferenceClusterStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 
-// VirtualInferenceCluster is the Schema for the virtualinferenceclusters API
 type VirtualInferenceCluster struct {
 	metav1.TypeMeta `json:",inline"`
 
-	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of VirtualInferenceCluster
 	// +required
 	Spec VirtualInferenceClusterSpec `json:"spec"`
 
-	// status defines the observed state of VirtualInferenceCluster
 	// +optional
 	Status VirtualInferenceClusterStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// VirtualInferenceClusterList contains a list of VirtualInferenceCluster
 type VirtualInferenceClusterList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`

@@ -33,6 +33,13 @@ kubectl -> Kubernetes API -> VirtualInferenceCluster -> Vetch controller -> owne
 The ConfigMaps validate controller lifecycle and ownership behavior only. They
 do not provision virtual machines, enforce resources, or run inference.
 
+The API accepts a VM template with a count of zero or one, workers per VM, a
+model identifier, guest image, guest CPU, and guest memory. VM creation is not
+implemented yet. Positive VM requests report provisioning pending; a zero VM
+request reports that no VMs are needed. The reported worker capacity is
+calculated from the request and does not imply running workers. Existing
+`spec.nodes` resources continue to use ConfigMaps.
+
 ## Target system
 
 The planned system separates infrastructure provisioning from prompt execution:

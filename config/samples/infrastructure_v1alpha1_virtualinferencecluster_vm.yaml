@@ -1,0 +1,13 @@
+# VM provisioning is pending. Image and model values are illustrative.
+apiVersion: infrastructure.vetch.io/v1alpha1
+kind: VirtualInferenceCluster
+metadata:
+  name: demo-vm
+spec:
+  vmCount: 1
+  workersPerVM: 2
+  model: example/model-v1
+  vm:
+    guestImage: registry.example.com/vetch/bootable-guest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    cpuCores: 2
+    memory: 4Gi
