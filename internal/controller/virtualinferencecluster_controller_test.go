@@ -28,6 +28,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -68,6 +69,14 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		configMaps := ownedConfigMaps(testContext, cluster)
 		for i := range configMaps {
 			Expect(k8sClient.Delete(testContext, &configMaps[i])).To(Succeed())
+		}
+		vm := &kubevirtv1.VirtualMachine{}
+		if err := k8sClient.Get(testContext, client.ObjectKey{Namespace: cluster.Namespace, Name: virtualMachineName(cluster.Name)}, vm); err == nil {
+			if metav1.IsControlledBy(vm, cluster) {
+				Expect(k8sClient.Delete(testContext, vm)).To(Succeed())
+			}
+		} else {
+			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		}
 		current := &infrastructurev1alpha1.VirtualInferenceCluster{}
 		err := k8sClient.Get(testContext, client.ObjectKeyFromObject(cluster), current)
@@ -163,7 +172,22 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 	})
 
-	It("reports VM provisioning as pending after legacy conversion", func() {
+	It("keeps legacy reconciliation available without the KubeVirt API", func() {
+		reconciler.vmAPIAvailable = ptr(false)
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(ownedConfigMaps(testContext, cluster)).To(HaveLen(2))
+
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).To(MatchError(ContainSubstring("KubeVirt VirtualMachine API is not installed")))
+		condition := meta.FindStatusCondition(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.Conditions, availableConditionType)
+		Expect(condition.Reason).To(Equal("ReconciliationFailed"))
+	})
+
+	It("creates one configured VM and removes legacy placeholders", func() {
 		_, err := reconciler.Reconcile(testContext, request)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(ownedConfigMaps(testContext, cluster)).To(HaveLen(2))
@@ -180,12 +204,137 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		Expect(condition.Reason).To(Equal("VMProvisioningPending"))
 		Expect(condition.ObservedGeneration).To(Equal(current.Generation))
 		Expect(current.Status.DeclaredWorkerCapacity).To(Equal(ptr(int32(2))))
-		Expect(ownedConfigMaps(testContext, current)).To(HaveLen(2))
+		Expect(ownedConfigMaps(testContext, current)).To(BeEmpty())
+		vm := getVM(testContext, current)
+		Expect(metav1.IsControlledBy(vm, current)).To(BeTrue())
+		Expect(vm.Spec.RunStrategy).To(Equal(ptr(kubevirtv1.RunStrategyAlways)))
+		Expect(vm.Spec.Template.Spec.Domain.CPU.Cores).To(Equal(uint32(2)))
+		Expect(vm.Spec.Template.Spec.Domain.Memory.Guest.Cmp(resource.MustParse("4Gi"))).To(Equal(0))
+		Expect(vm.Spec.Template.Spec.Domain.Devices.Disks).To(HaveLen(2))
+		Expect(vm.Spec.Template.Spec.Volumes).To(ContainElement(And(
+			HaveField("Name", vmDiskName),
+			HaveField("ContainerDisk.Image", *current.Spec.VM.GuestImage),
+		)))
+		Expect(vm.Spec.Template.Spec.Volumes).To(ContainElement(And(
+			HaveField("Name", vmConfigDiskName),
+			HaveField("CloudInitNoCloud.UserData", ContainSubstring(`{"model":"example/model-v1","workersPerVM":2}`)),
+		)))
 
 		_, err = reconciler.Reconcile(testContext, request)
 		Expect(err).NotTo(HaveOccurred())
 		again := getCluster(testContext, client.ObjectKeyFromObject(cluster))
 		Expect(again.ResourceVersion).To(Equal(current.ResourceVersion))
+		Expect(getVM(testContext, current).ResourceVersion).To(Equal(vm.ResourceVersion))
+	})
+
+	It("updates the VM when declared settings change", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		first := getVM(testContext, current)
+
+		current = getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec.VM.GuestImage = ptr("example.com/new-guest:v2")
+		current.Spec.WorkersPerVM = ptr(int32(3))
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		updated := getVM(testContext, current)
+		Expect(updated.UID).To(Equal(first.UID))
+		Expect(updated.ResourceVersion).NotTo(Equal(first.ResourceVersion))
+		Expect(updated.Spec.Template.Spec.Volumes).To(ContainElement(And(
+			HaveField("Name", vmDiskName), HaveField("ContainerDisk.Image", "example.com/new-guest:v2"),
+		)))
+		Expect(updated.Spec.Template.Spec.Volumes).To(ContainElement(And(
+			HaveField("Name", vmConfigDiskName),
+			HaveField("CloudInitNoCloud.UserData", ContainSubstring(`"workersPerVM":3`)),
+		)))
+		Expect(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.DeclaredWorkerCapacity).To(Equal(ptr(int32(3))))
+	})
+
+	It("reports VM readiness only after the current VM generation is observed", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		vm := getVM(testContext, current)
+		vm.Status.Ready = true
+		vm.Status.ObservedGeneration = vm.Generation - 1
+		Expect(k8sClient.Status().Update(testContext, vm)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		condition := meta.FindStatusCondition(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.Conditions, availableConditionType)
+		Expect(condition.Reason).To(Equal("VMProvisioningPending"))
+
+		vm = getVM(testContext, current)
+		vm.Status.ObservedGeneration = vm.Generation
+		Expect(k8sClient.Status().Update(testContext, vm)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		condition = meta.FindStatusCondition(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.Conditions, availableConditionType)
+		Expect(condition.Status).To(Equal(metav1.ConditionTrue))
+		Expect(condition.Reason).To(Equal("VMReady"))
+	})
+
+	It("refuses to adopt an unrelated VM with the desired name", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		collision := &kubevirtv1.VirtualMachine{ObjectMeta: metav1.ObjectMeta{
+			Name: virtualMachineName(cluster.Name), Namespace: cluster.Namespace,
+		}, Spec: kubevirtv1.VirtualMachineSpec{RunStrategy: ptr(kubevirtv1.RunStrategyAlways)}}
+		Expect(k8sClient.Create(testContext, collision)).To(Succeed())
+		DeferCleanup(func() { Expect(k8sClient.Delete(testContext, collision)).To(Succeed()) })
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).To(MatchError(ContainSubstring("is not controlled by")))
+		unchanged := getVM(testContext, current)
+		Expect(unchanged.OwnerReferences).To(BeEmpty())
+		Expect(unchanged.ResourceVersion).To(Equal(collision.ResourceVersion))
+		condition := meta.FindStatusCondition(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.Conditions, availableConditionType)
+		Expect(condition.Reason).To(Equal("ReconciliationFailed"))
+	})
+
+	It("deletes its VM when the requested count becomes zero", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+
+		current = getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec.VMCount = ptr(int32(0))
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		vm := &kubevirtv1.VirtualMachine{}
+		err = k8sClient.Get(testContext, client.ObjectKey{Namespace: cluster.Namespace, Name: virtualMachineName(cluster.Name)}, vm)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		condition := meta.FindStatusCondition(getCluster(testContext, client.ObjectKeyFromObject(cluster)).Status.Conditions, availableConditionType)
+		Expect(condition.Reason).To(Equal("NoVMsRequested"))
+	})
+
+	It("removes its VM when switching back to legacy nodes", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(getVM(testContext, current)).NotTo(BeNil())
+
+		current = getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = infrastructurev1alpha1.VirtualInferenceClusterSpec{Nodes: ptr(int32(1))}
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		vm := &kubevirtv1.VirtualMachine{}
+		err = k8sClient.Get(testContext, client.ObjectKey{Namespace: cluster.Namespace, Name: virtualMachineName(cluster.Name)}, vm)
+		Expect(apierrors.IsNotFound(err)).To(BeTrue())
+		Expect(ownedConfigMaps(testContext, current)).To(HaveLen(1))
 	})
 
 	It("rejects invalid VM API shapes", func() {
@@ -284,6 +433,14 @@ func getConfigMap(ctx context.Context, namespace string, name string) *corev1.Co
 	configMap := &corev1.ConfigMap{}
 	ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, configMap)).To(Succeed())
 	return configMap
+}
+
+func getVM(ctx context.Context, cluster *infrastructurev1alpha1.VirtualInferenceCluster) *kubevirtv1.VirtualMachine {
+	vm := &kubevirtv1.VirtualMachine{}
+	ExpectWithOffset(1, k8sClient.Get(ctx, client.ObjectKey{
+		Namespace: cluster.Namespace, Name: virtualMachineName(cluster.Name),
+	}, vm)).To(Succeed())
+	return vm
 }
 
 func ownedConfigMaps(

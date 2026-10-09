@@ -26,8 +26,11 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+	kubevirtv1 "kubevirt.io/api/core/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -62,12 +65,15 @@ var _ = BeforeSuite(func() {
 	var err error
 	err = infrastructurev1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
+	err = kubevirtv1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDs:                  []*apiextensionsv1.CustomResourceDefinition{testVMCRD()},
 		ErrorIfCRDPathMissing: true,
 	}
 
@@ -85,6 +91,34 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 })
+
+// Envtest installs a minimal VM CRD so controller tests can exercise the API
+// without installing KubeVirt's controllers or copying its generated CRD.
+func testVMCRD() *apiextensionsv1.CustomResourceDefinition {
+	const objectType = "object"
+	preserveUnknown := true
+	return &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{Name: "virtualmachines.kubevirt.io"},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "kubevirt.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Plural: "virtualmachines", Singular: "virtualmachine", Kind: "VirtualMachine", ListKind: "VirtualMachineList",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{{
+				Name: "v1", Served: true, Storage: true,
+				Schema: &apiextensionsv1.CustomResourceValidation{OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+					Type: objectType,
+					Properties: map[string]apiextensionsv1.JSONSchemaProps{
+						"spec":   {Type: objectType, XPreserveUnknownFields: &preserveUnknown},
+						"status": {Type: objectType, XPreserveUnknownFields: &preserveUnknown},
+					},
+				}},
+				Subresources: &apiextensionsv1.CustomResourceSubresources{Status: &apiextensionsv1.CustomResourceSubresourceStatus{}},
+			}},
+		},
+	}
+}
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")

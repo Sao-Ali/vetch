@@ -1,4 +1,5 @@
-# VM provisioning is pending. Image and model values are illustrative.
+# Fedora containerDisk for the first VM boot test. The model value is illustrative.
+# This guest can use cloud-init to receive /etc/vetch/config.json.
 apiVersion: infrastructure.vetch.io/v1alpha1
 kind: VirtualInferenceCluster
 metadata:
@@ -8,6 +9,6 @@ spec:
   workersPerVM: 2
   model: example/model-v1
   vm:
-    guestImage: registry.example.com/vetch/bootable-guest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    guestImage: quay.io/containerdisks/fedora:latest
     cpuCores: 2
     memory: 4Gi

@@ -16,6 +16,17 @@ nix develop
 
 The locked shell provides Go, gopls, kubectl, kind, Kustomize, Make, and Git.
 The Makefile pins project-specific generation, lint, and envtest tools.
+The flake defines shells for Apple Silicon macOS and x86-64 Linux. To check the
+shell definition and run the repository tests from outside the shell:
+
+```bash
+nix flake check --all-systems
+nix develop --command make test
+nix develop --command make build
+```
+
+KubeVirt and the container runtime are cluster and host prerequisites; they are
+not installed by the development shell.
 
 Without Nix, install these prerequisites manually:
 
@@ -26,6 +37,14 @@ Without Nix, install these prerequisites manually:
 - Make
 
 ## Run locally
+
+The placeholder `spec.nodes` workflow below needs only Kubernetes. The VM
+workflow also requires KubeVirt installed and available in the cluster, plus a
+bootable containerDisk image with cloud-init support. The local Apple Silicon
+Docker Desktop + kind environment cannot provide a verified hardware-accelerated
+KubeVirt boot path; use an isolated Linux KVM environment for boot checks.
+Start or restart the Vetch controller after installing KubeVirt so it registers
+the owned VM watch.
 
 Create an isolated development cluster, select it, and confirm the context:
 
@@ -55,6 +74,25 @@ The sample requests two nodes. Edit `spec.nodes` to test explicit scale-up or
 scale-down. Zero requests an empty cluster; the Kubernetes API rejects negative
 values.
 
+To request one VM after KubeVirt is installed, use the VM sample's Fedora
+containerDisk for a first boot test, then run:
+
+```bash
+kubectl config current-context
+kubectl apply -f config/samples/infrastructure_v1alpha1_virtualinferencecluster_vm.yaml
+kubectl get virtualinferencecluster demo-vm -o yaml
+kubectl get vm demo-vm-vm -o yaml
+kubectl get vmi
+```
+
+The VM has a deterministic name, `<cluster-name>-vm`. Kubernetes accepts the
+request through its API, so no Vetch CLI is needed. `Available=True` with
+reason `VMReady` means KubeVirt reports the VM ready for its current generation;
+it does not mean an inference worker or model is running. The guest receives
+`model` and `workersPerVM` in `/etc/vetch/config.json` through cloud-init when
+the image supports it. To request zero VMs, set `spec.vmCount` to `0` and apply
+the resource again. The API rejects `vmCount: 2`.
+
 Remove the sample when finished:
 
 ```bash
@@ -73,8 +111,8 @@ make build
 
 Tests use Ginkgo/Gomega and envtest, which runs a temporary Kubernetes API
 server and etcd independently of the development cluster. Envtest does not run
-the Kubernetes garbage collector, so cascading deletion must be verified in an
-isolated Kind cluster when needed.
+KubeVirt controllers or the Kubernetes garbage collector, so boot and cascading
+deletion must be verified in an isolated KubeVirt-enabled test cluster.
 
 After API fields or markers change, run:
 

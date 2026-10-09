@@ -8,9 +8,9 @@ The long-term system will manage CPU-backed inference workers in cloud virtual
 machines, compare them with an Arduino VENTUNO Q edge device, and route complete
 inference requests between healthy backends.
 
-> **Project status:** Vetch currently implements the Kubernetes controller
-> foundation. Virtual nodes are represented by owned ConfigMaps and do not run
-> inference workloads yet.
+> **Project status:** Vetch reconciles legacy placeholder nodes as owned
+> ConfigMaps and can request one owned KubeVirt VM when KubeVirt is installed.
+> It does not run inference workloads yet.
 
 ## How it works
 
@@ -37,14 +37,20 @@ uses deterministic names and Kubernetes ownership, repairs managed objects, and
 does not adopt unrelated ConfigMaps.
 
 The API also accepts a VM request using `spec.vmCount`, `spec.workersPerVM`,
-`spec.model`, and the guest settings in `spec.vm`. See the
-[VM example](config/samples/infrastructure_v1alpha1_virtualinferencecluster_vm.yaml).
-This mode does not create VMs yet: a positive count reports
-`Available=False` with reason `VMProvisioningPending`. A zero count reports
-`Available=True` with reason `NoVMsRequested`. Its
-`declaredWorkerCapacity` is the requested VM count times workers per VM, not
+`spec.model`, and the guest settings in `spec.vm`. With KubeVirt installed,
+`vmCount: 1` creates one owned KubeVirt VM; `vmCount: 0` removes it. The count is
+currently limited to zero or one. The VM uses the configured containerDisk
+image, guest CPU and memory, and cloud-init user data that writes the model and
+worker count to `/etc/vetch/config.json` inside a cloud-init-capable guest.
+This does not start inference workers. See the
+[VM example](config/samples/infrastructure_v1alpha1_virtualinferencecluster_vm.yaml)
+and [development guide](docs/development.md) for the KubeVirt prerequisite.
+
+`Available=True` with reason `VMReady` means KubeVirt reports the current VM
+generation ready; it does not mean inference is serving. The
+`declaredWorkerCapacity` value is requested VM count times workers per VM, not
 an observed worker count. Resources using only `spec.nodes` keep the legacy
-ConfigMap behavior.
+ConfigMap behavior. Switching to VM mode removes the old owned placeholders.
 
 ## Quick start
 
