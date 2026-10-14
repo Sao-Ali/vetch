@@ -93,6 +93,10 @@ it does not mean an inference worker or model is running. The guest receives
 the image supports it. To request zero VMs, set `spec.vmCount` to `0` and apply
 the resource again. The API rejects `vmCount: 2`.
 
+See [KubeVirt VM behavior and boot validation](kubevirt-vm-validation.md) for
+guest access, temporary disk behavior, and the tested restart procedure for
+applying model and worker configuration changes.
+
 Remove the sample when finished:
 
 ```bash

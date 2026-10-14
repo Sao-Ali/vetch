@@ -113,6 +113,7 @@ include generated CRDs and DeepCopy code in the change.
 - [Project roadmap](docs/roadmap.md)
 - [Evaluation plan](docs/evaluation.md)
 - [Development guide](docs/development.md)
+- [KubeVirt VM behavior and boot validation](docs/kubevirt-vm-validation.md)
 
 Vetch manages inference infrastructure; it does not train models, design chips,
 emulate GPU hardware, or claim CPU performance equivalent to dedicated
