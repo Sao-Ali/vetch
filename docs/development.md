@@ -93,9 +93,11 @@ it does not mean an inference worker or model is running. The guest receives
 the image supports it. To request zero VMs, set `spec.vmCount` to `0` and apply
 the resource again. The API rejects `vmCount: 2`.
 
-See [KubeVirt VM behavior and boot validation](kubevirt-vm-validation.md) for
-guest access, temporary disk behavior, and the tested restart procedure for
-applying model and worker configuration changes.
+Changing `model` or `workersPerVM` updates the VM template, but does not update
+the running guest's file. After changing either value, restart the VM with
+`virtctl restart <cluster-name>-vm` and wait for guest cloud-init to finish.
+The `containerDisk` is temporary: replacing the running VM instance discards
+guest-side changes such as installed packages and downloaded models.
 
 Remove the sample when finished:
 
