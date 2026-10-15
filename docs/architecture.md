@@ -20,25 +20,29 @@ not a core deliverable.
 
 ## Current implementation
 
-The repository currently implements the Kubernetes controller foundation. A
-namespaced `VirtualInferenceCluster` declares a desired node count, and the
-controller reconciles that count into deterministic, owned ConfigMaps. It
-creates, repairs, scales, and removes these dummy nodes and reports availability
-through resource status.
+The repository implements a namespaced `VirtualInferenceCluster` and its
+controller. In legacy mode, `spec.nodes` declares a desired placeholder count;
+the controller creates, repairs, scales, and removes deterministic, owned
+ConfigMaps. In VM mode, `spec.vmCount: 1` requests one KubeVirt VM.
 
 ```text
-kubectl -> Kubernetes API -> VirtualInferenceCluster -> Vetch controller -> owned ConfigMaps
+kubectl -> Kubernetes API -> VirtualInferenceCluster -> Vetch controller
+                                                       -> owned ConfigMaps (legacy)
+                                                       -> owned KubeVirt VM (VM mode)
 ```
 
 The ConfigMaps validate controller lifecycle and ownership behavior only. They
 do not provision virtual machines, enforce resources, or run inference.
 
 The API accepts a VM template with a count of zero or one, workers per VM, a
-model identifier, guest image, guest CPU, and guest memory. VM creation is not
-implemented yet. Positive VM requests report provisioning pending; a zero VM
-request reports that no VMs are needed. The reported worker capacity is
-calculated from the request and does not imply running workers. Existing
-`spec.nodes` resources continue to use ConfigMaps.
+model identifier, guest image, guest CPU, and guest memory. In VM mode, the
+controller reconciles one owned KubeVirt VirtualMachine with a containerDisk
+and cloud-init configuration for the declared model and worker count. KubeVirt
+must already be installed in the cluster. The controller reports whether
+KubeVirt has marked the current VM generation ready; this does not imply
+running inference workers. The reported worker capacity is calculated from
+the request. Existing `spec.nodes` resources continue to use ConfigMaps;
+switching to VM mode removes those owned placeholders.
 
 ## Target system
 
