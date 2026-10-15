@@ -153,3 +153,5 @@ make test
 
 Container deployment scaffolding is retained for later use. The currently
 verified workflow runs locally, and no published image is supplied.
+The deployment includes controller, leader-election, and metrics RBAC, but does
+not install optional user-facing admin, editor, or viewer ClusterRoles.
