@@ -16,6 +16,12 @@ Dockerfile.cross
 /Vetch Advisor Overview - Inference Infrastructure.pdf
 /Vetch Full Proposal.pdf
 
+# Local issue notes and problem journal
+/docs/agent.md
+/docs/issues-15-22-23-plan.md
+/docs/kubevirt-vm-validation.md
+/problems/
+
 # Local Go workspace
 go.work
 go.work.sum
