@@ -1,7 +1,6 @@
 # Build tools, binaries, and reports
 /bin/
 /dist/
-/.local/
 *.exe
 *.exe~
 *.dll
@@ -11,6 +10,12 @@
 *.out
 *.log
 Dockerfile.cross
+
+# Local planning and troubleshooting notes
+/.local/
+/problems/
+/docs/issues-15-22-23-plan.md
+/docs/kubevirt-vm-validation.md
 
 # Local project source documents (summarized in README.md)
 /Vetch Advisor Overview - Inference Infrastructure.pdf
