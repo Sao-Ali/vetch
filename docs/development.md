@@ -99,6 +99,11 @@ the running guest's file. After changing either value, restart the VM with
 The `containerDisk` is temporary: replacing the running VM instance discards
 guest-side changes such as installed packages and downloaded models.
 
+For the NixOS guest image containing the Vetch agent, see the
+[guest image build and validation guide](guest-image.md). The Fedora sample
+remains the generic first-boot example until a Vetch image is built and
+validated in KubeVirt.
+
 Remove the sample when finished:
 
 ```bash
@@ -146,6 +151,7 @@ make test
 | `config/manager/`, `config/default/` | Controller deployment scaffolding |
 | `docs/` | Architecture, roadmap, evaluation, and development guidance |
 | `Dockerfile`, `.dockerignore` | Operator container build |
+| `guest/` | NixOS KubeVirt guest and containerDisk packaging |
 | `Makefile` | Development, generation, and deployment commands |
 | `.github/workflows/` | Lint and test CI |
 | `skills/` | Repository-specific agent workflows |

@@ -8,6 +8,8 @@ This directory contains the detailed design and project guidance for Vetch.
 | [Roadmap](roadmap.md) | Project milestones, success criteria, and final demonstration |
 | [Evaluation](evaluation.md) | Cloud/edge benchmark and routing evaluation plan |
 | [Development](development.md) | Local setup, verification commands, and repository layout |
+| [Guest image](guest-image.md) | Build and validate the NixOS KubeVirt agent image |
+| [Issue #21 plan](issue-21-guest-image-plan.md) | Guest-image decisions, scope, and remaining boot evidence |
 
 ## Source of truth
 
