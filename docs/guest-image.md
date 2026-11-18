@@ -1,5 +1,11 @@
 # Vetch inference guest image
 
+Linux build and KubeVirt boot results are recorded in the
+[2026-11-17 validation report](guest-image-validation.md). Build, boot,
+cloud-init, non-root service, restart, and invalid-config checks passed.
+Inbound agent access and the documented port-forwarding workflow still need
+work; issue #21 is not fully validated.
+
 The KubeVirt guest image is a NixOS qcow2 containing the Vetch agent from
 `cmd/agent`. It is separate from the controller container built by the root
 `Dockerfile`. The guest starts the agent as the non-root `vetch` system user
@@ -85,8 +91,10 @@ service started after cloud-init, and the running process has user `vetch`.
 Check `systemctl status vetch-agent`, `journalctl -u vetch-agent`, and
 `id vetch` from authenticated guest access in the isolated test setup. Also
 check clean restart and that invalid configuration causes a visible service
-failure rather than a false health response. No such KubeVirt boot evidence has
-yet been recorded for this image.
+failure rather than a false health response. These checks passed in the
+[Linux validation run](guest-image-validation.md), which also found that the
+default guest firewall blocks inbound port 8080 and that port-forwarding timed
+out even with the guest firewall stopped.
 
 The `containerDisk` is ephemeral: replacing the VM instance loses guest-side
 changes. The controller currently provides only bootstrap config, so changing
@@ -111,5 +119,6 @@ The NixOS configuration also evaluated with `cloud-init` enabled, NoCloud as
 its data source, GRUB enabled, SSH disabled, and an agent service running as
 `vetch` after `cloud-final.service`. The x86-64 Linux qcow2 and OCI image have
 not been built here: this Mac has no Linux Nix builder configured and its Docker
-daemon is unavailable. The KubeVirt boot checks above remain required before
-issue #21 can be considered complete.
+daemon is unavailable. A subsequent Linux build and KubeVirt boot test is
+documented in the [validation report](guest-image-validation.md); its network
+access failures remain unresolved.
