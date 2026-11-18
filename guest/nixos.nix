@@ -6,6 +6,8 @@
 
   boot.loader.grub.enable = true;
   networking.useDHCP = lib.mkDefault true;
+  # The controller and test clients need to reach the agent's HTTP listener.
+  networking.firewall.allowedTCPPorts = [ 8080 ];
   services.cloud-init.settings.datasource_list = [ "NoCloud" ];
 
   # The agent has no SSH dependency; access for boot checks uses KubeVirt's console.

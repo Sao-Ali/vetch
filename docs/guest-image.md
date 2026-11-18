@@ -3,8 +3,10 @@
 Linux build and KubeVirt boot results are recorded in the
 [2026-11-17 validation report](guest-image-validation.md). Build, boot,
 cloud-init, non-root service, restart, and invalid-config checks passed.
-Inbound agent access and the documented port-forwarding workflow still need
-work; issue #21 is not fully validated.
+The 2026-11-17 image blocked inbound agent traffic at the guest firewall.
+The guest now allows TCP 8080, but that change still needs a Linux boot retest.
+The documented virtctl forwarding path also timed out with the firewall
+stopped, so it remains a separate diagnostic item.
 
 The KubeVirt guest image is a NixOS qcow2 containing the Vetch agent from
 `cmd/agent`. It is separate from the controller container built by the root
@@ -77,12 +79,17 @@ kubectl get vmi
 virtctl console demo-vm-vm
 ```
 
-Use `virtctl port-forward` to reach guest port 8080 from the test machine;
-check the exact syntax for the installed `virtctl` version with
-`virtctl port-forward --help`. Then request `/healthz` and `/version` through
-the forwarded local port. Those responses show that the agent is serving, not
-that a model or inference worker is ready. Inspect cloud-init completion and
-the agent service through the guest console or a separate test-access method.
+First request `/healthz` and `/version` from a cluster node that can reach the
+guest IP reported by `kubectl get vmi demo-vm-vm -o yaml`. This checks the
+guest firewall independently of KubeVirt forwarding. Then test
+`virtctl port-forward` to guest port 8080; check the exact syntax for the installed
+`virtctl` version with `virtctl port-forward --help`. The previous run found
+that forwarding timed out even when the guest firewall was stopped. If direct
+node-to-guest access succeeds but forwarding still fails, keep the results
+separate and inspect KubeVirt's network binding and forwarding logs. HTTP
+responses show that the agent is serving, not that a model or inference worker
+is ready. Inspect cloud-init completion and the agent service through the guest
+console or a separate test-access method.
 The production image intentionally has no default password or SSH key; do not
 put credentials in the image or source tree.
 
@@ -92,9 +99,9 @@ Check `systemctl status vetch-agent`, `journalctl -u vetch-agent`, and
 `id vetch` from authenticated guest access in the isolated test setup. Also
 check clean restart and that invalid configuration causes a visible service
 failure rather than a false health response. These checks passed in the
-[Linux validation run](guest-image-validation.md), which also found that the
-default guest firewall blocks inbound port 8080 and that port-forwarding timed
-out even with the guest firewall stopped.
+[Linux validation run](guest-image-validation.md). That report describes the
+original firewall and forwarding failures; neither network path has been
+retested with the new firewall setting.
 
 The `containerDisk` is ephemeral: replacing the VM instance loses guest-side
 changes. The controller currently provides only bootstrap config, so changing
@@ -122,3 +129,12 @@ not been built here: this Mac has no Linux Nix builder configured and its Docker
 daemon is unavailable. A subsequent Linux build and KubeVirt boot test is
 documented in the [validation report](guest-image-validation.md); its network
 access failures remain unresolved.
+
+After opening guest TCP 8080 in the NixOS configuration, these checks passed
+on macOS; a rebuilt image and network retest on Linux remain pending:
+
+```bash
+nix eval --json .#nixosConfigurations.vetch-guest.config.networking.firewall.allowedTCPPorts
+nix flake check --all-systems --no-build .
+git diff --check
+```
