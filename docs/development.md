@@ -99,10 +99,9 @@ the running guest's file. After changing either value, restart the VM with
 The `containerDisk` is temporary: replacing the running VM instance discards
 guest-side changes such as installed packages and downloaded models.
 
-For the NixOS guest image containing the Vetch agent, see the
-[guest image build and validation guide](guest-image.md). The Fedora sample
-remains the generic first-boot example until a Vetch image is built and
-validated in KubeVirt.
+NixOS guest rebuild instructions and validation are recorded in
+[issue #21](https://github.com/Sao-Ali/vetch/issues/21#issuecomment-6972248029). VM networking uses
+masquerade and exposes the agent on TCP 8080.
 
 Remove the sample when finished:
 

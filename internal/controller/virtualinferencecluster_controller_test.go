@@ -211,6 +211,12 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		Expect(vm.Spec.Template.Spec.Domain.CPU.Cores).To(Equal(uint32(2)))
 		Expect(vm.Spec.Template.Spec.Domain.Memory.Guest.Cmp(resource.MustParse("4Gi"))).To(Equal(0))
 		Expect(vm.Spec.Template.Spec.Domain.Devices.Disks).To(HaveLen(2))
+		Expect(vm.Spec.Template.Spec.Domain.Devices.Interfaces).To(Equal([]kubevirtv1.Interface{{
+			Name:                   kubevirtv1.DefaultPodNetwork().Name,
+			InterfaceBindingMethod: kubevirtv1.InterfaceBindingMethod{Masquerade: &kubevirtv1.InterfaceMasquerade{}},
+			Ports:                  []kubevirtv1.Port{{Name: vmAgentPortName, Port: 8080, Protocol: string(corev1.ProtocolTCP)}},
+		}}))
+		Expect(vm.Spec.Template.Spec.Networks).To(Equal([]kubevirtv1.Network{*kubevirtv1.DefaultPodNetwork()}))
 		Expect(vm.Spec.Template.Spec.Volumes).To(ContainElement(And(
 			HaveField("Name", vmDiskName),
 			HaveField("ContainerDisk.Image", *current.Spec.VM.GuestImage),
@@ -225,6 +231,37 @@ var _ = Describe("VirtualInferenceCluster Controller", func() {
 		again := getCluster(testContext, client.ObjectKeyFromObject(cluster))
 		Expect(again.ResourceVersion).To(Equal(current.ResourceVersion))
 		Expect(getVM(testContext, current).ResourceVersion).To(Equal(vm.ResourceVersion))
+	})
+
+	It("repairs pod network drift and preserves unrelated interfaces without repeated writes", func() {
+		current := getCluster(testContext, client.ObjectKeyFromObject(cluster))
+		current.Spec = validVMSpec()
+		Expect(k8sClient.Update(testContext, current)).To(Succeed())
+		_, err := reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		vm := getVM(testContext, current)
+		iface := &vm.Spec.Template.Spec.Domain.Devices.Interfaces[0]
+		iface.InterfaceBindingMethod = kubevirtv1.InterfaceBindingMethod{Bridge: &kubevirtv1.InterfaceBridge{}}
+		iface.Model = "virtio"
+		iface.Ports = nil
+		secondary := kubevirtv1.Interface{Name: "secondary"}
+		vm.Spec.Template.Spec.Domain.Devices.Interfaces = append(vm.Spec.Template.Spec.Domain.Devices.Interfaces, secondary)
+		vm.Spec.Template.Spec.Networks = nil
+		Expect(k8sClient.Update(testContext, vm)).To(Succeed())
+
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		repaired := getVM(testContext, current)
+		iface = &repaired.Spec.Template.Spec.Domain.Devices.Interfaces[0]
+		Expect(iface.Masquerade).NotTo(BeNil())
+		Expect(iface.Bridge).To(BeNil())
+		Expect(iface.Model).To(Equal("virtio"))
+		Expect(iface.Ports).To(Equal([]kubevirtv1.Port{{Name: vmAgentPortName, Port: 8080, Protocol: string(corev1.ProtocolTCP)}}))
+		Expect(repaired.Spec.Template.Spec.Domain.Devices.Interfaces).To(ContainElement(secondary))
+		Expect(repaired.Spec.Template.Spec.Networks).To(Equal([]kubevirtv1.Network{*kubevirtv1.DefaultPodNetwork()}))
+		_, err = reconciler.Reconcile(testContext, request)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(getVM(testContext, current).ResourceVersion).To(Equal(repaired.ResourceVersion))
 	})
 
 	It("updates the VM when declared settings change", func() {

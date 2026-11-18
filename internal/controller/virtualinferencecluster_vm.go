@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -32,6 +33,8 @@ import (
 
 	infrastructurev1alpha1 "github.com/Sao-Ali/vetch/api/v1alpha1"
 )
+
+const vmAgentPortName = "agent"
 
 func virtualMachineName(clusterName string) string {
 	return childName(clusterName, "-vm")
@@ -124,6 +127,7 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 	}
 	setVMDisk(&domain.Devices.Disks, vmDiskName)
 	setVMDisk(&domain.Devices.Disks, vmConfigDiskName)
+	setVMPodNetwork(&vm.Spec.Template.Spec)
 	setVMVolume(&vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
 		Name: vmDiskName,
 		VolumeSource: kubevirtv1.VolumeSource{
@@ -137,6 +141,34 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 		},
 	})
 	return nil
+}
+
+// Manage the default pod interface while preserving unrelated interfaces and
+// fields defaulted by KubeVirt. Masquerade gives the guest a routed return path
+// for requests from other pods, including virt-api port forwarding.
+func setVMPodNetwork(spec *kubevirtv1.VirtualMachineInstanceSpec) {
+	interfaces := &spec.Domain.Devices.Interfaces
+	index := len(*interfaces)
+	for i := range *interfaces {
+		if (*interfaces)[i].Name == kubevirtv1.DefaultPodNetwork().Name {
+			index = i
+			break
+		}
+	}
+	if index == len(*interfaces) {
+		*interfaces = append(*interfaces, kubevirtv1.Interface{Name: kubevirtv1.DefaultPodNetwork().Name})
+	}
+	iface := &(*interfaces)[index]
+	iface.InterfaceBindingMethod = kubevirtv1.InterfaceBindingMethod{Masquerade: &kubevirtv1.InterfaceMasquerade{}}
+	iface.Binding = nil
+	iface.Ports = []kubevirtv1.Port{{Name: vmAgentPortName, Port: 8080, Protocol: string(corev1.ProtocolTCP)}}
+	for i := range spec.Networks {
+		if spec.Networks[i].Name == kubevirtv1.DefaultPodNetwork().Name {
+			spec.Networks[i].NetworkSource = kubevirtv1.NetworkSource{Pod: &kubevirtv1.PodNetwork{}}
+			return
+		}
+	}
+	spec.Networks = append(spec.Networks, *kubevirtv1.DefaultPodNetwork())
 }
 
 func setVMDisk(disks *[]kubevirtv1.Disk, name string) {
