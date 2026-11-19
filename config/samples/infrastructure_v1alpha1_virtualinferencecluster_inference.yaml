@@ -1,0 +1,19 @@
+apiVersion: infrastructure.vetch.io/v1alpha1
+kind: VirtualInferenceCluster
+metadata:
+  name: local-inference
+spec:
+  vmCount: 1
+  workersPerVM: 1
+  model: Qwen/Qwen3-0.6B
+  vm:
+    # Build and load this image into a dedicated KubeVirt-enabled test cluster.
+    guestImage: vetch-guest:inference
+    cpuCores: 2
+    memory: 4Gi
+  worker:
+    modelFile: Qwen3-0.6B-Q8_0.gguf
+    modelSHA256: 9465e63a22add5354d9bb4b99e90117043c7124007664907259bd16d043bb031
+    cpuMillis: 1000
+    memoryBytes: 2147483648
+    contextTokens: 2048

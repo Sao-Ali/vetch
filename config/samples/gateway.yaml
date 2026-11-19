@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: vetch-gateway
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: vetch-gateway
+rules:
+  - apiGroups: [infrastructure.vetch.io]
+    resources: [virtualinferenceclusters]
+    verbs: [list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vetch-gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: vetch-gateway
+subjects:
+  - kind: ServiceAccount
+    name: vetch-gateway
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vetch-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vetch-gateway
+  template:
+    metadata:
+      labels:
+        app: vetch-gateway
+    spec:
+      serviceAccountName: vetch-gateway
+      containers:
+        - name: gateway
+          image: controller:inference
+          command: [/gateway]
+          args: [--namespace=default]
+          ports:
+            - containerPort: 8082
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8082
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vetch-gateway
+spec:
+  selector:
+    app: vetch-gateway
+  ports:
+    - port: 8082
+      targetPort: 8082

@@ -21,8 +21,10 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -32,15 +34,18 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	kubevirtv1 "kubevirt.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	infrastructurev1alpha1 "github.com/Sao-Ali/vetch/api/v1alpha1"
 )
 
 const (
 	availableConditionType = "Available"
+	vmDeletionPending      = "VMDeletionPending"
 	componentLabelKey      = "infrastructure.vetch.io/component"
 	clusterUIDLabelKey     = "infrastructure.vetch.io/cluster-uid"
 	nodeIndexLabelKey      = "infrastructure.vetch.io/node-index"
@@ -55,11 +60,13 @@ type VirtualInferenceClusterReconciler struct {
 	client.Client
 	Scheme         *runtime.Scheme
 	vmAPIAvailable *bool
+	AgentClient    *http.Client
 }
 
 // +kubebuilder:rbac:groups=infrastructure.vetch.io,resources=virtualinferenceclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=infrastructure.vetch.io,resources=virtualinferenceclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;delete
+// +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;delete
 
 func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -69,6 +76,16 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 	if err := r.Get(ctx, req.NamespacedName, cluster); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
+	cluster.Status.ReadyWorkers = 0
+	cluster.Status.AppliedGeneration = 0
+	cluster.Status.LastAgentContact = nil
+	for _, kind := range []string{"AgentReachable", "ConfigApplied", "WorkersReady"} {
+		if cluster.Spec.Worker != nil && cluster.Spec.VMCount != nil && *cluster.Spec.VMCount > 0 {
+			condition(cluster, kind, metav1.ConditionFalse, "VMPending", "Waiting for VM readiness")
+		} else {
+			meta.RemoveStatusCondition(&cluster.Status.Conditions, kind)
+		}
+	}
 
 	if cluster.Spec.VMCount != nil {
 		capacity := int32(0)
@@ -76,7 +93,8 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 			capacity = *cluster.Spec.VMCount * *cluster.Spec.WorkersPerVM
 		}
 		log.Info("Reconciling VirtualInferenceCluster", "desiredVMs", *cluster.Spec.VMCount)
-		status, reason, message := metav1.ConditionFalse, "VMProvisioningPending", "VM mode: VM is not ready"
+		var status metav1.ConditionStatus
+		var reason, message string
 		if *cluster.Spec.VMCount == 0 {
 			deleting, err := r.deleteOwnedVM(ctx, cluster)
 			if err != nil {
@@ -84,18 +102,35 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 					"ReconciliationFailed", err.Error(), &capacity))
 			}
 			if deleting {
-				reason, message = "VMDeletionPending", "VM mode: waiting for VM deletion"
+				status, reason, message = metav1.ConditionFalse, vmDeletionPending, "VM mode: waiting for VM deletion"
 			} else {
 				status, reason, message = metav1.ConditionTrue, "NoVMsRequested", "VM mode: no VMs requested"
 			}
 		} else {
 			vm, err := r.reconcileVM(ctx, cluster)
 			if err != nil {
+				condition(cluster, "VMReady", metav1.ConditionFalse, "ReconciliationFailed", err.Error())
 				return ctrl.Result{}, errors.Join(err, r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
 					"ReconciliationFailed", err.Error(), &capacity))
 			}
-			if vm.Status.Ready && vm.Status.ObservedGeneration >= vm.Generation {
-				status, reason, message = metav1.ConditionTrue, "VMReady", "VM mode: VM is running and ready"
+			status, reason, message = vmObservation(vm)
+			condition(cluster, "VMReady", status, reason, message)
+			if cluster.Spec.Worker != nil {
+				if err := r.reconcileAgentService(ctx, cluster); err != nil {
+					return ctrl.Result{}, errors.Join(err, r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
+						"ReconciliationFailed", err.Error(), &capacity))
+				}
+				if status == metav1.ConditionTrue {
+					status, reason, message = r.observeAgent(ctx, cluster)
+				}
+			}
+		}
+		if *cluster.Spec.VMCount == 0 || cluster.Spec.Worker == nil {
+			if *cluster.Spec.VMCount == 0 {
+				meta.RemoveStatusCondition(&cluster.Status.Conditions, "VMReady")
+			}
+			if err := r.deleteOwnedAgentService(ctx, cluster); err != nil {
+				return ctrl.Result{}, err
 			}
 		}
 		if err := r.deleteOwnedDummyNodes(ctx, cluster); err != nil {
@@ -105,6 +140,9 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 		if err := r.setAvailableCondition(ctx, cluster, status, reason, message, &capacity); err != nil {
 			return ctrl.Result{}, err
 		}
+		if cluster.Spec.Worker != nil && *cluster.Spec.VMCount > 0 {
+			return ctrl.Result{RequeueAfter: AgentPollInterval}, nil
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -112,6 +150,10 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 		return ctrl.Result{}, fmt.Errorf("legacy VirtualInferenceCluster %q has no nodes", cluster.Name)
 	}
 	log.Info("Reconciling VirtualInferenceCluster", "desiredNodes", *cluster.Spec.Nodes)
+	meta.RemoveStatusCondition(&cluster.Status.Conditions, "VMReady")
+	if err := r.deleteOwnedAgentService(ctx, cluster); err != nil {
+		return ctrl.Result{}, err
+	}
 	deletingVM, err := r.deleteOwnedVM(ctx, cluster)
 	if err != nil {
 		conditionErr := r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
@@ -128,7 +170,7 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 	status, reason := metav1.ConditionTrue, "Reconciled"
 	message := fmt.Sprintf("Legacy mode: all %d dummy nodes are available", *cluster.Spec.Nodes)
 	if deletingVM {
-		status, reason, message = metav1.ConditionFalse, "VMDeletionPending", "Legacy mode: waiting for VM deletion"
+		status, reason, message = metav1.ConditionFalse, vmDeletionPending, "Legacy mode: waiting for VM deletion"
 	}
 	if err := r.setAvailableCondition(ctx, cluster, status, reason, message, nil); err != nil {
 		return ctrl.Result{}, err
@@ -289,7 +331,13 @@ func (r *VirtualInferenceClusterReconciler) setAvailableCondition(
 	message string,
 	declaredWorkerCapacity *int32,
 ) error {
-	original := cluster.DeepCopy()
+	original := &infrastructurev1alpha1.VirtualInferenceCluster{}
+	if err := r.Get(ctx, client.ObjectKeyFromObject(cluster), original); err != nil {
+		return client.IgnoreNotFound(err)
+	}
+	if original.Generation != cluster.Generation || original.UID != cluster.UID {
+		return fmt.Errorf("VirtualInferenceCluster changed during reconciliation")
+	}
 	cluster.Status.DeclaredWorkerCapacity = declaredWorkerCapacity
 	meta.SetStatusCondition(&cluster.Status.Conditions, metav1.Condition{
 		Type:               availableConditionType,
@@ -298,29 +346,42 @@ func (r *VirtualInferenceClusterReconciler) setAvailableCondition(
 		Reason:             reason,
 		Message:            message,
 	})
+	// Intermediate observations in this reconciliation are not transitions.
+	for index := range cluster.Status.Conditions {
+		desired := &cluster.Status.Conditions[index]
+		if previous := meta.FindStatusCondition(original.Status.Conditions, desired.Type); previous != nil && previous.Status == desired.Status {
+			desired.LastTransitionTime = previous.LastTransitionTime
+		}
+	}
+	if previous := original.Status.LastAgentContact; previous != nil && cluster.Status.LastAgentContact != nil &&
+		time.Since(previous.Time) < AgentPollInterval {
+		cluster.Status.LastAgentContact = previous.DeepCopy()
+	}
 	if equality.Semantic.DeepEqual(original.Status, cluster.Status) {
 		return nil
 	}
-	if err := r.Status().Update(ctx, cluster); err != nil {
+	original.Status = cluster.Status
+	if err := r.Status().Update(ctx, original); err != nil {
 		return fmt.Errorf("update VirtualInferenceCluster status: %w", err)
 	}
 	return nil
 }
 
 func (r *VirtualInferenceClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&infrastructurev1alpha1.VirtualInferenceCluster{}).
-		Owns(&corev1.ConfigMap{})
+	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
+		For(&infrastructurev1alpha1.VirtualInferenceCluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Service{})
 	_, err := mgr.GetRESTMapper().RESTMapping(kubevirtv1.GroupVersion.WithKind("VirtualMachine").GroupKind(),
 		kubevirtv1.GroupVersion.Version)
 	available := err == nil
 	r.vmAPIAvailable = &available
 	if err == nil {
-		builder = builder.Owns(&kubevirtv1.VirtualMachine{})
+		controllerBuilder = controllerBuilder.Owns(&kubevirtv1.VirtualMachine{})
 	} else if meta.IsNoMatchError(err) {
 		logf.Log.Info("KubeVirt VirtualMachine API is unavailable, skipping VM watch")
 	} else {
 		return fmt.Errorf("discover KubeVirt VirtualMachine API: %w", err)
 	}
-	return builder.Named("virtualinferencecluster").Complete(r)
+	return controllerBuilder.Named("virtualinferencecluster").Complete(r)
 }

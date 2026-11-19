@@ -76,6 +76,39 @@ spec:
                 maximum: 1
                 minimum: 0
                 type: integer
+              worker:
+                description: worker enables managed inference. Omit for VM-only boot
+                  checks.
+                properties:
+                  contextTokens:
+                    format: int32
+                    maximum: 2048
+                    minimum: 256
+                    type: integer
+                  cpuMillis:
+                    format: int32
+                    maximum: 64000
+                    minimum: 100
+                    type: integer
+                  memoryBytes:
+                    format: int64
+                    minimum: 134217728
+                    type: integer
+                  modelFile:
+                    description: modelFile names an immutable artifact packaged in
+                      the guest's model directory.
+                    pattern: ^[A-Za-z0-9][A-Za-z0-9_.-]*\.gguf$
+                    type: string
+                  modelSHA256:
+                    pattern: ^[a-f0-9]{64}$
+                    type: string
+                required:
+                - contextTokens
+                - cpuMillis
+                - memoryBytes
+                - modelFile
+                - modelSHA256
+                type: object
               workersPerVM:
                 description: workersPerVM is a declared count, not observed capacity.
                 format: int32
@@ -92,11 +125,24 @@ spec:
               rule: '!has(self.vmCount) || self.vmCount == 0 || (has(self.workersPerVM)
                 && has(self.model) && has(self.vm) && has(self.vm.guestImage) && has(self.vm.cpuCores)
                 && has(self.vm.memory))'
+            - message: managed workers require VM mode
+              rule: '!has(self.worker) || has(self.vmCount)'
+            - message: managed inference supports at most 16 workers per VM
+              rule: '!has(self.worker) || !has(self.workersPerVM) || self.workersPerVM
+                <= 16'
+            - message: managed workers require VM mode
+              rule: '!has(self.worker) || has(self.vmCount)'
+            - message: managed inference supports at most 16 workers
+              rule: '!has(self.worker) || !has(self.workersPerVM) || self.workersPerVM
+                <= 16'
           status:
             properties:
+              appliedGeneration:
+                format: int64
+                type: integer
               conditions:
-                description: Available reflects legacy placeholders or an empty VM
-                  request; positive VM requests report pending.
+                description: Available reflects VM readiness, or serving readiness
+                  when spec.worker is set.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -158,6 +204,16 @@ spec:
               declaredWorkerCapacity:
                 description: declaredWorkerCapacity is vmCount * workersPerVM, not
                   serving capacity.
+                format: int32
+                type: integer
+              lastAgentContact:
+                description: lastAgentContact is a serving heartbeat, refreshed at
+                  most once per poll.
+                format: date-time
+                type: string
+              readyWorkers:
+                description: readyWorkers includes READY and BUSY workers with the
+                  current applied configuration.
                 format: int32
                 type: integer
             type: object

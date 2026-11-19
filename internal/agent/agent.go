@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Sao-Ali/vetch/internal/workload"
 )
 
 const (
@@ -23,9 +25,15 @@ var Version = "dev"
 
 // Config contains the values the agent receives when the guest boots.
 type Config struct {
-	ListenAddress string `json:"listenAddress,omitempty"`
-	Model         string `json:"model"`
-	WorkersPerVM  int32  `json:"workersPerVM"`
+	ListenAddress string                 `json:"listenAddress,omitempty"`
+	Model         string                 `json:"model"`
+	WorkersPerVM  int32                  `json:"workersPerVM"`
+	Generation    int64                  `json:"generation,omitempty"`
+	Worker        *workload.WorkerConfig `json:"worker,omitempty"`
+}
+
+func (config Config) Workload() workload.Config {
+	return workload.Config{Generation: config.Generation, Model: config.Model, WorkersPerVM: config.WorkersPerVM, Worker: config.Worker}
 }
 
 // LoadConfig reads one complete JSON config and validates it before startup.
@@ -92,10 +100,16 @@ func writeJSON(writer http.ResponseWriter, value any) {
 }
 
 // Serve runs until the context is cancelled, then shuts down active requests.
-func Serve(ctx context.Context, listener net.Listener) error {
+func Serve(ctx context.Context, listener net.Listener, handlers ...http.Handler) error {
+	handler := Handler()
+	if len(handlers) > 0 {
+		handler = handlers[0]
+	}
 	server := &http.Server{
-		Handler:           Handler(),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 	serveResult := make(chan error, 1)
 	go func() { serveResult <- server.Serve(listener) }()

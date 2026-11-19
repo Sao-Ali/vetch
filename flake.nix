@@ -21,7 +21,7 @@
           src = self;
           subPackages = [ "cmd/agent" ];
           go = pkgs.go_1_26;
-          vendorHash = "sha256-azHCwq4x+lWgbi0FUGVoa5DU/P3tF0hmTCG2zZ5q/kQ=";
+          vendorHash = "sha256-ppsTgu1AvgAyeiWAYMT6YjNsiBkiWKdyfwQQR/Wu/RQ=";
           env.CGO_ENABLED = "0";
         };
     in

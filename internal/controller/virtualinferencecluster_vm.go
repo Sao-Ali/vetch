@@ -95,6 +95,11 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 		Model        string `json:"model"`
 		WorkersPerVM int32  `json:"workersPerVM"`
 	}{Model: *cluster.Spec.Model, WorkersPerVM: *cluster.Spec.WorkersPerVM})
+	if cluster.Spec.Worker != nil {
+		// Keep bootstrap stable across worker changes. The controller applies the
+		// current generation over HTTP once the guest is reachable.
+		guestConfig = []byte(`{"model":"bootstrap","workersPerVM":1}`)
+	}
 	if err != nil {
 		return fmt.Errorf("encode guest configuration: %w", err)
 	}
@@ -113,6 +118,11 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 	if vm.Spec.Template == nil {
 		vm.Spec.Template = &kubevirtv1.VirtualMachineInstanceTemplateSpec{}
 	}
+	if vm.Spec.Template.ObjectMeta.Labels == nil {
+		vm.Spec.Template.ObjectMeta.Labels = make(map[string]string)
+	}
+	vm.Spec.Template.ObjectMeta.Labels[clusterUIDLabelKey] = string(cluster.UID)
+	vm.Spec.Template.ObjectMeta.Labels[componentLabelKey] = vmComponent
 	domain := &vm.Spec.Template.Spec.Domain
 	if domain.CPU == nil {
 		domain.CPU = &kubevirtv1.CPU{}

@@ -25,6 +25,10 @@ import (
 // +kubebuilder:validation:XValidation:rule="has(self.nodes) || has(self.vmCount)",message="either nodes or vmCount must be specified"
 // +kubebuilder:validation:XValidation:rule="!has(self.vmCount) || !has(self.nodes) || self.nodes == 0",message="nodes must be zero or omitted in VM mode"
 // +kubebuilder:validation:XValidation:rule="!has(self.vmCount) || self.vmCount == 0 || (has(self.workersPerVM) && has(self.model) && has(self.vm) && has(self.vm.guestImage) && has(self.vm.cpuCores) && has(self.vm.memory))",message="positive vmCount requires workersPerVM, model, guestImage, cpuCores, and memory"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || has(self.vmCount)",message="managed workers require VM mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || !has(self.workersPerVM) || self.workersPerVM <= 16",message="managed inference supports at most 16 workers per VM"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || has(self.vmCount)",message="managed workers require VM mode"
+// +kubebuilder:validation:XValidation:rule="!has(self.worker) || !has(self.workersPerVM) || self.workersPerVM <= 16",message="managed inference supports at most 16 workers"
 type VirtualInferenceClusterSpec struct {
 	// nodes requests legacy dummy ConfigMaps.
 	// +kubebuilder:validation:Minimum=0
@@ -48,6 +52,27 @@ type VirtualInferenceClusterSpec struct {
 
 	// +optional
 	VM *VirtualInferenceVMTemplate `json:"vm,omitempty"`
+
+	// worker enables managed inference. Omit for VM-only boot checks.
+	// +optional
+	Worker *InferenceWorkerTemplate `json:"worker,omitempty"`
+}
+
+// InferenceWorkerTemplate configures each separately limited CPU runtime.
+type InferenceWorkerTemplate struct {
+	// modelFile names an immutable artifact packaged in the guest's model directory.
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9_.-]*\.gguf$`
+	ModelFile string `json:"modelFile"`
+	// +kubebuilder:validation:Pattern=`^[a-f0-9]{64}$`
+	ModelSHA256 string `json:"modelSHA256"`
+	// +kubebuilder:validation:Minimum=100
+	// +kubebuilder:validation:Maximum=64000
+	CPUMillis int32 `json:"cpuMillis"`
+	// +kubebuilder:validation:Minimum=134217728
+	MemoryBytes int64 `json:"memoryBytes"`
+	// +kubebuilder:validation:Minimum=256
+	// +kubebuilder:validation:Maximum=2048
+	ContextTokens int32 `json:"contextTokens"`
 }
 
 type VirtualInferenceVMTemplate struct {
@@ -73,8 +98,16 @@ type VirtualInferenceClusterStatus struct {
 	// declaredWorkerCapacity is vmCount * workersPerVM, not serving capacity.
 	// +optional
 	DeclaredWorkerCapacity *int32 `json:"declaredWorkerCapacity,omitempty"`
+	// readyWorkers includes READY and BUSY workers with the current applied configuration.
+	// +optional
+	ReadyWorkers int32 `json:"readyWorkers,omitempty"`
+	// +optional
+	AppliedGeneration int64 `json:"appliedGeneration,omitempty"`
+	// lastAgentContact is a serving heartbeat, refreshed at most once per poll.
+	// +optional
+	LastAgentContact *metav1.Time `json:"lastAgentContact,omitempty"`
 
-	// Available reflects legacy placeholders or an empty VM request; positive VM requests report pending.
+	// Available reflects VM readiness, or serving readiness when spec.worker is set.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
