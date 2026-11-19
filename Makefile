@@ -1,5 +1,7 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
+# Image URL for the bootable KubeVirt guest disk.
+GUEST_IMG ?= vetch-guest:dev
 # YEAR defines the year value used for substituting the YEAR placeholder in the boilerplate header.
 YEAR ?= $(shell date +%Y)
 
@@ -95,6 +97,15 @@ docker-build: ## Build docker image with the manager.
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}
+
+.PHONY: guest-qcow2
+guest-qcow2: ## Build the x86-64 NixOS guest disk (requires a Linux builder).
+	mkdir -p bin
+	nix build .#guest-qcow2 --out-link bin/guest-qcow2
+
+.PHONY: guest-containerdisk
+guest-containerdisk: guest-qcow2 ## Package the guest disk for KubeVirt (GUEST_IMG=...).
+	CONTAINER_TOOL="$(CONTAINER_TOOL)" ./guest/build-containerdisk.sh bin/guest-qcow2/vetch-guest.qcow2 "$(GUEST_IMG)"
 
 .PHONY: build-installer
 build-installer: manifests generate kustomize ## Generate a consolidated YAML with CRDs and deployment.

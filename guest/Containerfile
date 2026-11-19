@@ -1,0 +1,3 @@
+# KubeVirt reads the guest disk from /disk; this image is not a running container.
+FROM scratch
+COPY --chown=107:107 disk.qcow2 /disk/disk.qcow2
