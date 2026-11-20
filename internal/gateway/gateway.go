@@ -63,8 +63,9 @@ func (gateway *Gateway) infer(writer http.ResponseWriter, request *http.Request)
 			cluster.Status.AppliedGeneration != cluster.Generation || cluster.Status.ReadyWorkers < 1 {
 			continue
 		}
-		gateway.forward(ctx, writer, input, cluster)
-		return // Never retry an ambiguous request or silently change models.
+		if gateway.forward(ctx, writer, input, cluster) {
+			return
+		}
 	}
 	if !matched {
 		workload.Fail(writer, http.StatusNotFound, "unsupported_model", "no backend is configured for the requested model")
@@ -73,12 +74,14 @@ func (gateway *Gateway) infer(writer http.ResponseWriter, request *http.Request)
 	workload.Fail(writer, http.StatusServiceUnavailable, "capacity_exhausted", "no fresh, ready backend is available")
 }
 
-func (gateway *Gateway) forward(ctx context.Context, writer http.ResponseWriter, input workload.Request, cluster infrastructurev1alpha1.VirtualInferenceCluster) {
+// forward returns false only when the backend explicitly refused admission.
+// Every response that could follow execution is terminal, including transport errors.
+func (gateway *Gateway) forward(ctx context.Context, writer http.ResponseWriter, input workload.Request, cluster infrastructurev1alpha1.VirtualInferenceCluster) bool {
 	body, _ := json.Marshal(input)
 	upstream, err := http.NewRequestWithContext(ctx, http.MethodPost, controller.AgentURL(cluster.Name, cluster.Namespace)+"/infer", bytes.NewReader(body))
 	if err != nil {
 		workload.Fail(writer, http.StatusBadGateway, "backend_error", "cannot construct backend request")
-		return
+		return true
 	}
 	upstream.Header.Set("Content-Type", "application/json")
 	httpClient := gateway.HTTPClient
@@ -92,23 +95,27 @@ func (gateway *Gateway) forward(ctx context.Context, writer http.ResponseWriter,
 			code = http.StatusGatewayTimeout
 		}
 		workload.Fail(writer, code, "backend_error", "backend request failed or deadline expired")
-		return
+		return true
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		var failure workload.Failure
 		if json.NewDecoder(io.LimitReader(response.Body, workload.MaxBodyBytes)).Decode(&failure) != nil {
 			workload.Fail(writer, http.StatusBadGateway, "backend_error", "backend returned an invalid error")
-			return
+			return true
+		}
+		if response.StatusCode == http.StatusServiceUnavailable && failure.Code == "capacity_exhausted" {
+			return false
 		}
 		workload.Write(writer, response.StatusCode, failure)
-		return
+		return true
 	}
 	var result workload.Result
 	if json.NewDecoder(io.LimitReader(response.Body, workload.MaxBodyBytes)).Decode(&result) != nil || result.ID != input.ID || result.Model != input.Model {
 		workload.Fail(writer, http.StatusBadGateway, "backend_error", "backend response identity does not match the request")
-		return
+		return true
 	}
 	result.BackendID = cluster.Namespace + "/" + cluster.Name
 	workload.Write(writer, http.StatusOK, result)
+	return true
 }
