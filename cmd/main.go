@@ -141,8 +141,9 @@ func main() {
 	}
 
 	if err := (&controller.VirtualInferenceClusterReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:              mgr.GetClient(),
+		Scheme:              mgr.GetScheme(),
+		ControllerNamespace: os.Getenv("POD_NAMESPACE"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "virtualinferencecluster")
 		os.Exit(1)

@@ -128,7 +128,7 @@ func condition(cluster *infrastructurev1alpha1.VirtualInferenceCluster, kind str
 	})
 }
 
-func (r *VirtualInferenceClusterReconciler) observeAgent(ctx context.Context, cluster *infrastructurev1alpha1.VirtualInferenceCluster) (metav1.ConditionStatus, string, string) {
+func (r *VirtualInferenceClusterReconciler) observeAgent(ctx context.Context, cluster *infrastructurev1alpha1.VirtualInferenceCluster, configToken string) (metav1.ConditionStatus, string, string) {
 	cluster.Status.ReadyWorkers = 0
 	cluster.Status.AppliedGeneration = 0
 	for _, kind := range []string{"AgentReachable", "ConfigApplied", "WorkersReady"} {
@@ -146,6 +146,7 @@ func (r *VirtualInferenceClusterReconciler) observeAgent(ctx context.Context, cl
 		return metav1.ConditionFalse, "AgentConfigFailed", "Cannot construct agent request"
 	}
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Authorization", "Bearer "+configToken)
 	httpClient := r.AgentClient
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 5 * time.Second}

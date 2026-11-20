@@ -116,7 +116,7 @@ func TestWorkerLifecycleAndAdmission(t *testing.T) {
 	default:
 	}
 	body, _ := json.Marshal(workload.Request{ID: "test", Model: config.Model, Prompt: "hello", MaxTokens: 16, Deadline: time.Now().Add(time.Minute)})
-	handler := manager.Handler()
+	handler := manager.Handler("")
 	first := httptest.NewRecorder()
 	finished := make(chan struct{})
 	go func() {
@@ -219,7 +219,7 @@ func TestInferenceDeadlineCancelsRuntime(t *testing.T) {
 	waitState(t, manager, workload.Ready)
 	body, _ := json.Marshal(workload.Request{ID: "deadline", Model: config.Model, Prompt: "hello", MaxTokens: 1, Deadline: time.Now().Add(50 * time.Millisecond)})
 	response := httptest.NewRecorder()
-	manager.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/infer", bytes.NewReader(body)))
+	manager.Handler("").ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/infer", bytes.NewReader(body)))
 	if response.Code != http.StatusGatewayTimeout {
 		t.Fatalf("deadline status: %d", response.Code)
 	}

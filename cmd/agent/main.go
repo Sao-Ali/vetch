@@ -38,6 +38,10 @@ func run() error {
 	if closeErr != nil {
 		return fmt.Errorf("close agent config: %w", closeErr)
 	}
+	configToken, err := agent.LoadConfigToken(agent.DefaultConfigTokenPath)
+	if err != nil {
+		return err
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	modelRoot := os.Getenv("VETCH_MODEL_ROOT")
@@ -68,7 +72,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("listen for agent requests: %w", err)
 	}
-	if err := agent.Serve(ctx, listener, manager.Handler()); err != nil {
+	if err := agent.Serve(ctx, listener, manager.Handler(configToken)); err != nil {
 		return fmt.Errorf("serve agent requests: %w", err)
 	}
 	return nil

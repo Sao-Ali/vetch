@@ -362,7 +362,7 @@ func (manager *Manager) infer(writer http.ResponseWriter, request *http.Request)
 		DurationMS: time.Since(started).Milliseconds()})
 }
 
-func (manager *Manager) Handler() http.Handler {
+func (manager *Manager) Handler(configToken string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", Handler())
 	mux.Handle("GET /version", Handler())
@@ -373,6 +373,11 @@ func (manager *Manager) Handler() http.Handler {
 	mux.HandleFunc("GET /workers", status)
 	mux.HandleFunc("GET /capacity", status)
 	mux.HandleFunc("PUT /config", func(writer http.ResponseWriter, request *http.Request) {
+		if !authorizedConfig(request.Header.Get("Authorization"), configToken) {
+			writer.Header().Set("WWW-Authenticate", "Bearer")
+			workload.Fail(writer, http.StatusUnauthorized, "unauthorized", "configuration credential required")
+			return
+		}
 		var config workload.Config
 		if err := workload.Decode(writer, request, &config); err != nil {
 			workload.Fail(writer, http.StatusBadRequest, "invalid_config", err.Error())

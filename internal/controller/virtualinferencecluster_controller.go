@@ -27,6 +27,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -46,6 +47,7 @@ import (
 const (
 	availableConditionType = "Available"
 	vmDeletionPending      = "VMDeletionPending"
+	applicationName        = "vetch"
 	componentLabelKey      = "infrastructure.vetch.io/component"
 	clusterUIDLabelKey     = "infrastructure.vetch.io/cluster-uid"
 	nodeIndexLabelKey      = "infrastructure.vetch.io/node-index"
@@ -58,15 +60,18 @@ const (
 
 type VirtualInferenceClusterReconciler struct {
 	client.Client
-	Scheme         *runtime.Scheme
-	vmAPIAvailable *bool
-	AgentClient    *http.Client
+	Scheme              *runtime.Scheme
+	vmAPIAvailable      *bool
+	AgentClient         *http.Client
+	ControllerNamespace string
 }
 
 // +kubebuilder:rbac:groups=infrastructure.vetch.io,resources=virtualinferenceclusters,verbs=get;list;watch
 // +kubebuilder:rbac:groups=infrastructure.vetch.io,resources=virtualinferenceclusters/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;delete
+// +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;delete
 // +kubebuilder:rbac:groups=kubevirt.io,resources=virtualmachines,verbs=get;list;watch;create;update;delete
 
 func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -107,7 +112,16 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 				status, reason, message = metav1.ConditionTrue, "NoVMsRequested", "VM mode: no VMs requested"
 			}
 		} else {
-			vm, err := r.reconcileVM(ctx, cluster)
+			bootstrapUID, configToken := "", ""
+			if cluster.Spec.Worker != nil {
+				secret, err := r.reconcileAgentAccess(ctx, cluster)
+				if err != nil {
+					return ctrl.Result{}, errors.Join(err, r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
+						"ReconciliationFailed", err.Error(), &capacity))
+				}
+				bootstrapUID, configToken = string(secret.UID), string(secret.Data[configTokenKey])
+			}
+			vm, err := r.reconcileVM(ctx, cluster, bootstrapUID)
 			if err != nil {
 				condition(cluster, "VMReady", metav1.ConditionFalse, "ReconciliationFailed", err.Error())
 				return ctrl.Result{}, errors.Join(err, r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
@@ -121,17 +135,12 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 						"ReconciliationFailed", err.Error(), &capacity))
 				}
 				if status == metav1.ConditionTrue {
-					status, reason, message = r.observeAgent(ctx, cluster)
+					status, reason, message = r.observeAgent(ctx, cluster, configToken)
 				}
 			}
 		}
-		if *cluster.Spec.VMCount == 0 || cluster.Spec.Worker == nil {
-			if *cluster.Spec.VMCount == 0 {
-				meta.RemoveStatusCondition(&cluster.Status.Conditions, "VMReady")
-			}
-			if err := r.deleteOwnedAgentService(ctx, cluster); err != nil {
-				return ctrl.Result{}, err
-			}
+		if err := r.cleanupInactiveAgent(ctx, cluster, reason); err != nil {
+			return ctrl.Result{}, err
 		}
 		if err := r.deleteOwnedDummyNodes(ctx, cluster); err != nil {
 			return ctrl.Result{}, errors.Join(err, r.setAvailableCondition(ctx, cluster, metav1.ConditionFalse,
@@ -152,6 +161,9 @@ func (r *VirtualInferenceClusterReconciler) Reconcile(ctx context.Context, req c
 	log.Info("Reconciling VirtualInferenceCluster", "desiredNodes", *cluster.Spec.Nodes)
 	meta.RemoveStatusCondition(&cluster.Status.Conditions, "VMReady")
 	if err := r.deleteOwnedAgentService(ctx, cluster); err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.deleteOwnedAgentAccess(ctx, cluster); err != nil {
 		return ctrl.Result{}, err
 	}
 	deletingVM, err := r.deleteOwnedVM(ctx, cluster)
@@ -294,7 +306,7 @@ func applyDummyNodeFields(
 	if configMap.Labels == nil {
 		configMap.Labels = make(map[string]string)
 	}
-	configMap.Labels["app.kubernetes.io/managed-by"] = "vetch"
+	configMap.Labels["app.kubernetes.io/managed-by"] = applicationName
 	configMap.Labels[componentLabelKey] = dummyNodeComponent
 	configMap.Labels[clusterUIDLabelKey] = string(cluster.UID)
 	configMap.Labels[nodeIndexLabelKey] = strconv.FormatInt(int64(nodeIndex), 10)
@@ -371,7 +383,9 @@ func (r *VirtualInferenceClusterReconciler) SetupWithManager(mgr ctrl.Manager) e
 	controllerBuilder := ctrl.NewControllerManagedBy(mgr).
 		For(&infrastructurev1alpha1.VirtualInferenceCluster{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&corev1.ConfigMap{}).
-		Owns(&corev1.Service{})
+		Owns(&corev1.Service{}).
+		Owns(&corev1.Secret{}).
+		Owns(&networkingv1.NetworkPolicy{})
 	_, err := mgr.GetRESTMapper().RESTMapping(kubevirtv1.GroupVersion.WithKind("VirtualMachine").GroupKind(),
 		kubevirtv1.GroupVersion.Version)
 	available := err == nil

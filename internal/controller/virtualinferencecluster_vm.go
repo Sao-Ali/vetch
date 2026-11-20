@@ -43,6 +43,7 @@ func virtualMachineName(clusterName string) string {
 func (r *VirtualInferenceClusterReconciler) reconcileVM(
 	ctx context.Context,
 	cluster *infrastructurev1alpha1.VirtualInferenceCluster,
+	bootstrapUID string,
 ) (*kubevirtv1.VirtualMachine, error) {
 	if r.vmAPIAvailable != nil && !*r.vmAPIAvailable {
 		return nil, errors.New("KubeVirt VirtualMachine API is not installed")
@@ -61,7 +62,7 @@ func (r *VirtualInferenceClusterReconciler) reconcileVM(
 		if err := controllerutil.SetControllerReference(cluster, vm, r.Scheme); err != nil {
 			return nil, fmt.Errorf("set owner for VM %q: %w", name, err)
 		}
-		if err := applyVMFields(vm, cluster); err != nil {
+		if err := applyVMFields(vm, cluster, bootstrapUID); err != nil {
 			return nil, err
 		}
 		if err := r.Create(ctx, vm); err != nil {
@@ -73,7 +74,7 @@ func (r *VirtualInferenceClusterReconciler) reconcileVM(
 		return nil, fmt.Errorf("VM %q already exists and is not controlled by VirtualInferenceCluster %q", name, cluster.Name)
 	}
 	original := vm.DeepCopy()
-	if err := applyVMFields(vm, cluster); err != nil {
+	if err := applyVMFields(vm, cluster, bootstrapUID); err != nil {
 		return nil, err
 	}
 	if equality.Semantic.DeepEqual(original, vm) {
@@ -85,7 +86,7 @@ func (r *VirtualInferenceClusterReconciler) reconcileVM(
 	return vm, nil
 }
 
-func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha1.VirtualInferenceCluster) error {
+func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha1.VirtualInferenceCluster, bootstrapUID string) error {
 	settings := cluster.Spec.VM
 	if settings == nil || settings.GuestImage == nil || settings.CPUCores == nil || settings.Memory == nil ||
 		cluster.Spec.WorkersPerVM == nil || cluster.Spec.Model == nil {
@@ -108,7 +109,7 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 	if vm.Labels == nil {
 		vm.Labels = make(map[string]string)
 	}
-	vm.Labels["app.kubernetes.io/managed-by"] = "vetch"
+	vm.Labels["app.kubernetes.io/managed-by"] = applicationName
 	vm.Labels[componentLabelKey] = vmComponent
 	vm.Labels[clusterUIDLabelKey] = string(cluster.UID)
 	strategy := kubevirtv1.RunStrategyAlways
@@ -123,6 +124,16 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 	}
 	vm.Spec.Template.ObjectMeta.Labels[clusterUIDLabelKey] = string(cluster.UID)
 	vm.Spec.Template.ObjectMeta.Labels[componentLabelKey] = vmComponent
+	cloudInit := &kubevirtv1.CloudInitNoCloudSource{UserData: userData}
+	if cluster.Spec.Worker != nil {
+		if vm.Spec.Template.ObjectMeta.Annotations == nil {
+			vm.Spec.Template.ObjectMeta.Annotations = make(map[string]string)
+		}
+		vm.Spec.Template.ObjectMeta.Annotations[bootstrapUIDAnnotation] = bootstrapUID
+		cloudInit = &kubevirtv1.CloudInitNoCloudSource{UserDataSecretRef: &corev1.LocalObjectReference{Name: agentSecretName(cluster.Name)}}
+	} else {
+		delete(vm.Spec.Template.ObjectMeta.Annotations, bootstrapUIDAnnotation)
+	}
 	domain := &vm.Spec.Template.Spec.Domain
 	if domain.CPU == nil {
 		domain.CPU = &kubevirtv1.CPU{}
@@ -147,7 +158,7 @@ func applyVMFields(vm *kubevirtv1.VirtualMachine, cluster *infrastructurev1alpha
 	setVMVolume(&vm.Spec.Template.Spec.Volumes, kubevirtv1.Volume{
 		Name: vmConfigDiskName,
 		VolumeSource: kubevirtv1.VolumeSource{
-			CloudInitNoCloud: &kubevirtv1.CloudInitNoCloudSource{UserData: userData},
+			CloudInitNoCloud: cloudInit,
 		},
 	})
 	return nil

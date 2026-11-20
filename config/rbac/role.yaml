@@ -17,6 +17,16 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - watch
+- apiGroups:
   - infrastructure.vetch.io
   resources:
   - virtualinferenceclusters
@@ -36,6 +46,17 @@ rules:
   - kubevirt.io
   resources:
   - virtualmachines
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
   verbs:
   - create
   - delete
