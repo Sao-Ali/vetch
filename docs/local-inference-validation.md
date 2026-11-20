@@ -1,5 +1,9 @@
 # Local inference validation — 2026-11-19
 
+This records the original `be0e8eb` implementation. The subsequent configuration
+authentication, ingress, and backend-admission fixes have a separate
+[review follow-up and validation record](review-be0-fixes.md).
+
 The implementation was checked on x86-64 Linux with KVM, in the dedicated
 `kind-vetch-inference-test` cluster (Kubernetes 1.35.0, KubeVirt 1.9.0).
 Every cluster mutation used an isolated kubeconfig under ignored `bin/` and

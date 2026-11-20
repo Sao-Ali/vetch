@@ -37,20 +37,50 @@ do not provision virtual machines, enforce resources, or run inference.
 The API accepts a VM template with a count of zero or one, workers per VM, a
 model identifier, guest image, guest CPU, and guest memory. In VM mode, the
 controller reconciles one owned KubeVirt VirtualMachine with a containerDisk
-and cloud-init configuration for the declared model and worker count. KubeVirt
+and boot configuration. Without `spec.worker`, cloud-init supplies only the
+declared model and worker count for VM boot checks. KubeVirt
 must already be installed in the cluster. The controller reports whether
 KubeVirt has marked the current VM generation ready; this does not imply
 running inference workers. The reported worker capacity is calculated from
-the request. Existing `spec.nodes` resources continue to use ConfigMaps;
+the request in `declaredWorkerCapacity`; inference mode additionally reports
+observed `readyWorkers`. Existing `spec.nodes` resources continue to use ConfigMaps;
 switching to VM mode removes those owned placeholders.
 
-## Target system
+## Implemented local inference path
 
-The planned system separates infrastructure provisioning from prompt execution:
+When `spec.worker` is present, the controller creates an owned agent Service,
+an immutable bootstrap Secret, and an ingress NetworkPolicy for the VM. The
+Secret supplies cloud-init userdata containing a private configuration
+credential. The VM spec contains the Secret reference, not its contents.
+
+The non-root agent validates model checksums and aggregate resource budgets,
+starts CPU-only llama.cpp processes inside separate cgroup-v2 CPU/RAM limits,
+and advances the applied generation after all requested models load. It reports
+PROVISIONING, READY, BUSY, OFFLINE, and ERROR; failed workers retry after a
+backoff during configuration reconciliation. Worker changes use the agent's
+HTTP interface. VM hardware/image changes still require a VM restart.
+
+The controller polls the agent with bounded timeouts and reports VM readiness,
+reachability, applied configuration, and worker readiness separately. The
+gateway filters for current model/generation and fresh observations, then lets
+the agent atomically admit a request to a free worker. Returned metadata
+includes model, backend, worker, device, token counts, and runtime duration.
+
+Configuration writes require the private bootstrap credential. Ingress is
+limited to controller pods in the configured controller namespace and gateway
+pods in the resource's namespace when the CNI enforces NetworkPolicy. Read and
+inference endpoints do not implement authentication or TLS yet. Keep these
+services on trusted private networks; authenticated/encrypted edge transport
+remains follow-up work. Rebuilding the guest is required to deploy agent changes.
+
+## Planned edge extension
+
+The local implementation already separates infrastructure provisioning from
+prompt execution. The planned extension adds physical edge backends:
 
 ```text
 Provisioning
-User/CLI -> Kubernetes API -> Vetch Operator -> KubeVirt VM(s) -> Vetch Agent -> workers
+YAML/client -> Kubernetes API -> Vetch Operator -> KubeVirt VM -> Vetch Agent -> workers
 
 Inference
 User -> inference gateway -> capacity/health policy -> cloud worker or edge adapter
@@ -59,17 +89,16 @@ User -> inference gateway -> capacity/health policy -> cloud worker or edge adap
 
 ### Component responsibilities
 
-- **AWS:** supplies cloud infrastructure. EC2 provides worker machines and EKS
-  provides a managed Kubernetes control plane.
+- **Central machine:** hosts Kubernetes, the Vetch controller/gateway, and local
+  KubeVirt inference capacity. AWS is optional future deployment work.
 - **Kubernetes:** stores desired state and manages declared workloads and their
   lifecycle.
 - **KubeVirt:** manages inference-server virtual machines through Kubernetes.
-  One planned VM represents one inference server.
+  Each managed VM represents one inference server.
 - **Vetch Operator:** reconciles Vetch custom resources into infrastructure.
-- **Vetch Agent:** runs inside an inference VM, manages workers, enforces CPU and
-  memory limits, and reports state and measurements.
-- **Inference runtime:** performs model computation. A CPU-capable runtime such
-  as `llama.cpp` is a candidate, subject to compatibility testing.
+- **Vetch Agent:** runs inside the inference VM, manages workers, enforces CPU and
+  memory limits, and reports state. Native ARM64 board packaging is planned.
+- **Inference runtime:** llama.cpp currently performs local CPU model computation.
 - **Inference gateway:** accepts prompts, selects an eligible worker, and
   returns results. Generated tokens do not travel through the Kubernetes API.
 - **Edge adapter:** reports supported models, health, capacity, and results from
@@ -99,14 +128,17 @@ without enforcing it does not meet the project goal.
 
 ## Routing and failure behavior
 
-The first distribution policy sends each complete request to one backend. It
-filters for healthy backends that support the model and have a free slot, then
-chooses among eligible targets using queue length.
+The current distribution policy sends each complete request to a fresh,
+healthy backend serving the requested model. Loaded-worker observations include
+BUSY workers, so admission is enforced by the selected agent. If that agent
+explicitly returns HTTP 503 with `capacity_exhausted`, the gateway can try
+another eligible backend with the original request ID, model, and deadline.
 
 When capacity is exhausted, a request must enter a bounded queue or receive a
 clear capacity error. Marking a worker or backend offline stops new assignments.
-In-flight failures receive bounded retries or a clear error, and duplicate
-attempts are recorded.
+Transport errors, other failures, and invalid responses return a clear error
+without retrying a request that might already have executed. Queueing, automatic
+edge selection, and latency-based routing remain planned.
 
 ## Boundaries
 

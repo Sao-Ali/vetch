@@ -41,6 +41,36 @@ ClusterIP Service. `GET /healthz` reports agent process health, not model readin
 | `GET /workers`, `GET /capacity` | The same observed snapshot; READY workers can accept a request, BUSY workers are serving one |
 | `POST /infer` | Execute a non-streaming, explicitly model-matched request |
 
+`PUT /config` requires `Authorization: Bearer <private-credential>`. The
+controller generates a separate random 256-bit credential per cluster in an
+owned immutable Secret. Secret-backed cloud-init installs it as
+`/etc/vetch/config-token`, owned by `root:vetch` with mode `0440`; it is never
+stored in the VM spec or status. The agent reads this private file at startup.
+Missing/incorrect credentials return 401 before decoding or applying a change;
+an absent credential file disables HTTP configuration while retaining health
+endpoints. Configuration applied locally at agent bootstrap remains trusted.
+
+The controller also owns an ingress NetworkPolicy selecting this VM's pods.
+It permits TCP 8080 from Vetch controller pods in the controller namespace and
+gateway pods in the resource's namespace. Controller deployments obtain that
+namespace from `POD_NAMESPACE`; host-run controllers default to `vetch-system`.
+NetworkPolicy requires an enforcing CNI; policy creation and envtest do not
+prove isolation. The bearer credential protects configuration writes even when
+network isolation is unavailable. Requests remain HTTP on the trusted cluster
+network; this does not provide TLS or authenticate inference/read endpoints.
+
+Rebuild the guest image when upgrading to this authenticated agent. Existing
+demo images from before this fix do not authenticate writes.
+Use a new image tag or digest, update `spec.vm.guestImage`, load the image onto
+the target node, and restart the VM. Rebuilding an image on the host alone does
+not replace an already running guest.
+
+Rotate a credential by replacing its Secret through an authorized Kubernetes
+operation and restarting
+the VM. The replacement Secret UID changes the VM template generation, keeping
+serving readiness false until the current guest boots with the new credential.
+Never print Secret contents or include credentials in examples or Git.
+
 Configuration changes require a newer generation. Reapplying identical settings
 does not restart healthy processes. Validation failures leave the existing
 configuration running. Applied generation advances after all models load.
@@ -71,7 +101,10 @@ interval. The gateway requires a heartbeat no older than 30 seconds and the
 current applied and observed generations. Agent admission handles races between
 discovery and requests. Unsupported models return 404; busy/unready capacity
 returns 503. Runtime/backend failures return 502, and execution deadline expiry
-returns 504. Requests are not automatically retried after ambiguous failures.
+returns 504. An explicit HTTP 503 `capacity_exhausted` rejection permits trying
+the next eligible backend with the same model, ID, and deadline. Transport errors,
+other failures, and malformed responses are not retried because execution may
+already have started.
 
 The gateway lists resources only in its configured namespace. Its sample RBAC
 permits only that list operation. Keep the agent and gateway private: the sample

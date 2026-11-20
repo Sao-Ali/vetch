@@ -8,11 +8,28 @@ The long-term system will manage CPU-backed inference workers in cloud virtual
 machines, compare them with an Arduino VENTUNO Q edge device, and route complete
 inference requests between healthy backends.
 
-> **Project status:** Vetch reconciles legacy placeholder nodes as owned
-> ConfigMaps and can request one owned KubeVirt VM when KubeVirt is installed.
-> It does not run inference workloads yet.
+> **Project status:** Vetch runs real local CPU inference in a KubeVirt VM.
+> The NixOS guest contains Qwen3-0.6B Q8_0 and llama.cpp; its agent manages
+> resource-limited workers and the gateway returns generated responses.
+> Legacy ConfigMap placeholders remain supported. Physical edge routing and
+> persistent-host acceptance are follow-up work.
 
 ## How it works
+
+The inference path has been exercised with one and two workers in a dedicated
+Kind/KubeVirt test cluster:
+
+```text
+YAML -> Kubernetes API -> Vetch controller -> KubeVirt VM -> agent -> workers
+Prompt -> inference gateway -> matching ready backend -> generated response
+```
+
+Start with the [inference YAML](config/samples/infrastructure_v1alpha1_virtualinferencecluster_inference.yaml),
+[local inference setup](docs/local-inference.md), and
+[validation results](docs/local-inference-validation.md). The current direction
+uses this machine as the central server; AWS is optional future infrastructure.
+
+### Legacy placeholder mode
 
 A `VirtualInferenceCluster` declares the desired number of virtual nodes:
 
@@ -42,17 +59,24 @@ The API also accepts a VM request using `spec.vmCount`, `spec.workersPerVM`,
 currently limited to zero or one. The VM uses the configured containerDisk
 image, guest CPU and memory, and cloud-init user data that writes the model and
 worker count to `/etc/vetch/config.json` inside a cloud-init-capable guest.
-This does not start inference workers. See the
+Without `spec.worker`, this is a VM-only boot check. With `spec.worker`, the
+controller creates a private bootstrap Secret and agent Service/NetworkPolicy,
+and applies authenticated configuration after the agent becomes reachable.
+The managed guest must contain the selected runtime and verified model file.
+See the
 [VM example](config/samples/infrastructure_v1alpha1_virtualinferencecluster_vm.yaml)
 and [development guide](docs/development.md) for the KubeVirt prerequisite.
 
-`Available=True` with reason `VMReady` means KubeVirt reports the current VM
-generation ready; it does not mean inference is serving. The
+For VM-only requests, `Available=True` with reason `VMReady` means KubeVirt reports
+the current VM generation ready. Inference-enabled requests instead require
+current applied configuration and loaded, healthy workers before reporting
+`Available=True` with reason `InferenceReady`. The separate `VMReady` condition
+reports guest readiness. The
 `declaredWorkerCapacity` value is requested VM count times workers per VM, not
 an observed worker count. Resources using only `spec.nodes` keep the legacy
 ConfigMap behavior. Switching to VM mode removes the old owned placeholders.
 
-## Quick start
+## Legacy placeholder quick start
 
 You need Docker, [kind](https://kind.sigs.k8s.io/), kubectl, Make, and Go 1.26 or
 newer. Alternatively, enter the reproducible development environment with
@@ -113,6 +137,9 @@ include generated CRDs and DeepCopy code in the change.
 - [Project roadmap](docs/roadmap.md)
 - [Evaluation plan](docs/evaluation.md)
 - [Development guide](docs/development.md)
+- [Local inference setup](docs/local-inference.md)
+- [Local inference validation](docs/local-inference-validation.md)
+- [MacBook SSH demo and edge-testing plan](docs/edge-device-testing-plan.md)
 
 Vetch manages inference infrastructure; it does not train models, design chips,
 emulate GPU hardware, or claim CPU performance equivalent to dedicated

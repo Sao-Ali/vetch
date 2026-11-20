@@ -2,14 +2,18 @@
 
 ## Scope and workflow
 
-Vetch is a Kubernetes-based platform for virtual AI inference infrastructure.
-VirtualInferenceCluster has spec.nodes and the controller reconciles owned
-ConfigMaps as dummy nodes, including explicit scaling and status.
+Vetch is a self-hosted Kubernetes platform for CPU inference infrastructure.
+VirtualInferenceCluster supports legacy spec.nodes ConfigMap placeholders and
+spec.vmCount (zero or one) KubeVirt VMs. Optional spec.worker enables managed
+llama.cpp processes inside the NixOS guest, resource limits, agent configuration
+convergence, serving readiness, and HTTP inference through the gateway.
 
-Do not introduce KubeVirt, inference runtimes,
-virtual accelerators, a CLI, cloud infrastructure, databases, a REST backend,
-a frontend, or monitoring systems until requested.
-The Kubernetes API is the control-plane API.
+Kubernetes is the management API. Prompts/results travel through the gateway,
+agent, and runtime, never through Kubernetes resources. This machine is the
+central server; physical edge registration/routing, the CLI, and persistent-host
+acceptance are follow-up work. AWS is not required for the current workflow.
+Do not add other infrastructure providers, runtimes, accelerator abstractions,
+databases, a management REST backend, a frontend, or monitoring until requested.
 
 Keep changes scoped, incremental, and verified. Document behavior changes and
 the commands used to validate them.
@@ -20,7 +24,11 @@ Do not stage, commit, push, or deploy unless authorized.
 
 - api/v1alpha1: API definitions and registration.
 - cmd/main.go: controller-manager entry point.
+- cmd/agent, internal/agent: guest agent, configuration authentication, and worker supervision.
+- cmd/gateway, internal/gateway: model-matched inference admission and forwarding.
+- internal/workload: shared HTTP request/result and agent configuration types.
 - internal/controller: reconciliation and tests.
+- guest: NixOS guest and containerdisk packaging; flake.nix pins build inputs.
 - config/samples: editable examples.
 - skills: repository-specific agent workflows; keep each skill self-contained and
   validate changed skills with the skill-creator validator when available.
@@ -46,6 +54,15 @@ Do not stage, commit, push, or deploy unless authorized.
 - Use finalizers only when external cleanup requires them; ConfigMap children
   can use Kubernetes garbage collection.
 - Scope RBAC to the operations actually implemented.
+- Keep owned VMs, Services, Secrets, and NetworkPolicies in the parent's
+  namespace and check controller ownership before modifying or removing them.
+- Configuration writes must fail closed without the bootstrap credential.
+  Keep credentials in owned Secrets and private guest files, never inline VM
+  userdata, ConfigMaps, status, logs, examples, or source control.
+- NetworkPolicy restrictions require a supporting CNI; do not claim policy
+  enforcement from envtest or from merely creating a policy object.
+- Retry another backend only after an explicit admission rejection. Do not
+  retry requests whose execution outcome is ambiguous or substitute model IDs.
 
 ## Verification
 

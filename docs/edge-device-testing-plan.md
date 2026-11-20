@@ -33,10 +33,10 @@ an HTTP client; it does not need to host a VM or receive the server's kubeconfig
 
 ### Prepare the Linux machine
 
-1. Confirm its reachable hostname/IP, intended SSH user, and authorized public
-   key. Verify the SSH host fingerprint through a trusted channel. Keep private
-   keys on the MacBook. Changes to the host's SSH configuration are separate
-   setup work, not performed by this plan.
+1. Follow [MacBook SSH setup](macbook-ssh-demo.md) for this machine's actual
+   addresses, username `ali`, public host-key fingerprint, initial key enrollment,
+   and the `vetch-linux` SSH alias. Keep private keys on the MacBook. Changes to
+   the host's SSH configuration are separate setup work, not performed by this plan.
 2. Recreate the dedicated `vetch-inference-test` cluster using the setup guide,
    with a kubeconfig under ignored `bin/`. Confirm its exact context before any
    cluster mutation. Never use a development or production cluster for failure
@@ -48,11 +48,15 @@ an HTTP client; it does not need to host a VM or receive the server's kubeconfig
    running when an SSH shell disconnects. Wait for inference `Available=True`.
 5. Keep the gateway private and forward its Service to Linux loopback.
 
-Replace `linux-user@linux-host` with the server's SSH destination. From a MacBook
-terminal, SSH into the server and run:
+After configuring the `vetch-linux` alias, connect from a MacBook terminal:
 
 ```bash
-ssh 'linux-user@linux-host'
+ssh vetch-linux
+```
+
+In that Linux SSH session, run:
+
+```bash
 cd /home/ali/vetch
 export KUBECONFIG="$PWD/bin/inference-test.kubeconfig"
 test "$(kubectl config current-context)" = kind-vetch-inference-test
@@ -65,7 +69,7 @@ Keep that forwarding session open. From another MacBook terminal:
 
 ```bash
 ssh -N -o ExitOnForwardFailure=yes \
-  -L 127.0.0.1:18082:127.0.0.1:8082 'linux-user@linux-host'
+  -L 127.0.0.1:18082:127.0.0.1:8082 vetch-linux
 ```
 
 From a third MacBook terminal, send a prompt through the tunnel. This uses
@@ -173,8 +177,9 @@ separately. The runtime listener stays on board loopback behind the agent.
 
 For the first central-to-board test, use an SSH tunnel with the existing HTTP
 agent contract, or implement authenticated HTTPS before exposing that contract
-across the network. Current agent listeners do not implement HTTPS or endpoint
-authentication. Certificate/credential installation and rotation require an
+across the network. Current agent listeners authenticate configuration writes
+using a private bootstrap credential, but do not implement HTTPS or authenticate
+inference/read endpoints. Certificate/credential installation and rotation require an
 explicit design; never put credential values in examples or Git.
 
 Complete when the central machine can obtain a real board-generated response

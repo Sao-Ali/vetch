@@ -3,6 +3,15 @@
 The cloud foundation is the minimum successful deliverable. Edge benchmarking
 and routing follow it and depend on access to compatible hardware and runtimes.
 
+The accepted deployment direction is a self-hosted central Linux machine.
+The local VM/agent/gateway path is implemented and tested, including real
+Qwen3 responses, enforced worker budgets, concurrent workers, and recovery.
+See [validation](local-inference-validation.md) for evidence and the remaining
+persistent-host acceptance gate. The next practical demonstration is the
+[MacBook SSH workflow](edge-device-testing-plan.md), followed by board-local
+inference investigation. The quarter headings below describe milestones, not
+a claim that every item is complete.
+
 ## Repository foundation — complete
 
 - Define `VirtualInferenceCluster` with an explicit desired node count.
@@ -35,8 +44,9 @@ process and changes to limits or availability affect admission predictably.
 
 ## Quarter 2 — cloud, edge, and routing
 
-1. **AWS deployment:** validate compatible EC2 virtualization, choose a
-   cost-conscious deployment size, and deploy the cloud foundation on EKS.
+1. **Persistent central deployment:** verify service/VM recovery after a real
+   host reboot, configuration backup/restore, and protected client access.
+   AWS/EKS is optional future deployment work, not an edge prerequisite.
 2. **VENTUNO Q integration:** run a compatible model through the common
    request/result interface and report whether execution uses CPU or supported
    specialized acceleration.
